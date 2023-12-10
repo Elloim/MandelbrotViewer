@@ -69,7 +69,24 @@ void printMsPerFrame(double* LastTime, int* nbFrames) {
 	}
 }
 
+int mandelbrotFunc(long double complex c, int max_n) {
 
+	int n = 0;
+	long double complex z = 0. + 0. * I;
+
+	while (n < max_n) {
+		if (sqrtl(powl(creall(z), 2) + powl(cimagl(z), 2)) > 2) {
+		
+			break;
+		}
+		
+		z = z*z + c;
+		n++;
+	}
+
+
+	return n;
+}
 
 int main() {
 
@@ -121,20 +138,52 @@ int main() {
 
 	glfwSwapInterval(0);
 
+
+	long double complex c; 
+
+	long double xmin = -2.5;
+	long double xmax = 1;
+	long double ymin = -1;
+	long double ymax = 1.;
+
+	int max_n = 1000;
+
+	long double xscale = (xmax - xmin) / width;
+	long double yscale = (ymax - ymin) / height;
+
 	double LastTime = glfwGetTime();
 	int nbFrames = 0;
 	glRasterPos2i(-1, -1);
 	while (!glfwWindowShouldClose(window)) {
-		
+
 		glfwGetFramebufferSize(window, &width, &height);
 		glClear(GL_COLOR_BUFFER_BIT);
 
+		xscale = (xmax - xmin) / width;
+		yscale = (ymax - ymin) / height;
+		
+		count = 0;
+		for (int i = 0; i < height; i++) {
+			for (int j = 0; j < width; j++) {
+				c = -2.5 + j * xscale + I * (-1 + i * yscale);
+				
+				float color = mandelbrotFunc(c, max_n)/ (float)max_n;
+
+				data[count] = 0.;
+				data[count+1] = 0.;
+				data[count+2] = color;
+				count += 3;
+			}
+		}
 
 		glDrawPixels(width, height, GL_RGB, GL_FLOAT, data);		
 		glfwSwapBuffers(window);
 		glfwPollEvents();
 		printMsPerFrame(&LastTime, &nbFrames);
-	}	
+	}
+
+
+	printf("%d\n", mandelbrotFunc(c, 1000));
 
 	glfwDestroyWindow(window);
 	glfwTerminate();

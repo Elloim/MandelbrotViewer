@@ -28,6 +28,8 @@ void error_callback(int error, const char* description);
 
 void printMsPerFrame(double* LastTime, int* nbFrames);
 
+int mandelbrotFunc(long double complex c, int max_n);
+
 // Definition variables globales
 
 const char * cubeVertexFilename = "./Shaders/cubeVertex.glsl";
