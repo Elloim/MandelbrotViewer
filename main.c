@@ -75,17 +75,36 @@ int mandelbrotFunc(long double complex c, int max_n) {
 	long double complex z = 0. + 0. * I;
 
 	while (n < max_n) {
-		if (sqrtl(powl(creall(z), 2) + powl(cimagl(z), 2)) > 2) {
-		
+		if (powl(creall(z), 2) + powl(cimagl(z), 2) > 4) {
+
 			break;
 		}
-		
+
 		z = z*z + c;
 		n++;
 	}
 
 
 	return n;
+}
+
+void gradientInterpol(int points[][3], float** gradient, int nb_points, int nb_gradient) {
+
+	gradient = (float**) malloc(sizeof(float*) * nb_gradient * nb_points);
+	printf("ddd : %f\n", gradient[0][0]);
+	float rslope = 0;
+	float gslope = 0;
+	float bslope = 0;
+	for (int i = 0; i < nb_points-1; i++) {
+		rslope = (float) (points[i+1][0] - points[i][0]) / nb_gradient;
+		gslope = (float) (points[i+1][1] - points[i][1]) / nb_gradient;
+		bslope = (float) (points[i+1][2] - points[i][2]) / nb_gradient;
+		for (int j = 0; j < nb_gradient; j++) {
+			gradient[i+j] = (float*) malloc(sizeof(float) * 3);
+			gradient[i+j][0] = (rslope * j + points[i][0])/255.;
+			gradient[i+j][1] = (gslope * j + points[i][1])/255.;
+			gradient[i+j][2] = (bslope * j + points[i][2])/255.;		}
+	}
 }
 
 int main() {
@@ -141,18 +160,45 @@ int main() {
 
 	long double complex c; 
 
-	long double xmin = -2.5;
-	long double xmax = 1;
-	long double ymin = -1;
-	long double ymax = 1.;
+	long double xmin = -1.;
+	long double xmax = 0.5;
+	long double ymax = (height/(long double)width) * (xmax - xmin)/2;
+	printf("ymax: %Lf\n", ymax);
+	long double ymin = - ymax;
 
-	int max_n = 1000;
+	int max_n = 100;
 
 	long double xscale = (xmax - xmin) / width;
 	long double yscale = (ymax - ymin) / height;
 
+	int gradient[][3] = {
+		{66, 30, 1},
+		{25, 7, 26},
+		{9,   1,  47},
+		{4,   4,  73},
+		{  0,   7, 100},
+		{ 12,  44, 138},
+		{ 24,  82, 177},
+		{57, 125, 209},
+		{134, 181, 229},
+		{211, 236, 248},
+		{241, 233, 191},
+		{248, 201,  95},
+		{255, 170,   0},
+		{204, 128,   0},
+		{153,  87,   0},
+		{106,  52,   3}};
+
+	//float ** gradient;
+	int size_grad = 16;
+	//gradientInterpol(gradient_points, gradient, 16, 128);
+	//printf("grd : %f\n", gradient[0][0]);
+
 	double LastTime = glfwGetTime();
 	int nbFrames = 0;
+	double smoothed;
+	int cols[3];
+	int iter = 0;
 	glRasterPos2i(-1, -1);
 	while (!glfwWindowShouldClose(window)) {
 
@@ -161,17 +207,20 @@ int main() {
 
 		xscale = (xmax - xmin) / width;
 		yscale = (ymax - ymin) / height;
-		
+
 		count = 0;
 		for (int i = 0; i < height; i++) {
 			for (int j = 0; j < width; j++) {
-				c = -2.5 + j * xscale + I * (-1 + i * yscale);
-				
-				float color = mandelbrotFunc(c, max_n)/ (float)max_n;
+				c = -xmax + j * xscale + I * (ymin + i * yscale);
 
-				data[count] = 0.;
-				data[count+1] = 0.;
-				data[count+2] = color;
+				//float color = mandelbrotFunc(c, max_n)/ (float)max_n;
+				//smoothed = log2(log2((double)cimagl(c)*cimagl(c) + creall(c) * creall(c)) / 2);
+				//memcpy((void *)cols, (const void *) gradient[(mandelbrotFunc(c, max_n)) % 16], sizeof(int) * 3);
+
+				iter = mandelbrotFunc(c, max_n);
+				data[count] = gradient[iter%size_grad][0]/255.;
+				data[count+1] = gradient[iter%size_grad][1]/255.;
+				data[count+2] = gradient[iter%size_grad][2]/255.;
 				count += 3;
 			}
 		}

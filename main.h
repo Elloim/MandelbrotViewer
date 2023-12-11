@@ -30,6 +30,8 @@ void printMsPerFrame(double* LastTime, int* nbFrames);
 
 int mandelbrotFunc(long double complex c, int max_n);
 
+void gradientInterpol(int points[][3], float** gradient, int nb_points, int nb_gradients);
+
 // Definition variables globales
 
 const char * cubeVertexFilename = "./Shaders/cubeVertex.glsl";
