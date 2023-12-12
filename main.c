@@ -26,7 +26,7 @@ void printMsPerFrame(double* LastTime, int* nbFrames) {
 	(*nbFrames)++;
 
 	if (current - *LastTime >= 1.0) {
-		printf("%f ms/frames\n", 1000.0/(double)(*nbFrames));
+		printf("%f ms/frame | %d FPS\n", 1000.0/(double)(*nbFrames), *nbFrames);
 		*nbFrames = 0;
 		*LastTime = glfwGetTime();
 	}
@@ -35,19 +35,24 @@ void printMsPerFrame(double* LastTime, int* nbFrames) {
 int mandelbrotFunc(long double complex* c, int max_n) {
 
 	int n = 0;
-	long double complex z = 0. + 0. * I;
 
-	while (n < max_n) {
-		if (powl(creall(z), 2) + powl(cimagl(z), 2) > 4) {
+	long double x2 = 0.;
+	long double y2 = 0.;
+	long double x = 0.;
+	long double y = 0.;
 
-			break;
-		}
+	long double x0 = creall(*c);
+	long double y0 = cimagl(*c);
 
-		z = z*z + *c;
+	while (n < max_n && x2 + y2 < 4) {
+		y = 2 * x * y + y0;
+		x = x2 - y2 + x0;
+		x2 = x * x;
+		y2 = y * y;
 		n++;
 	}
 
-	*c = z;
+	*c = x + y * I;
 	return n;
 }
 
@@ -68,7 +73,6 @@ void gradientInterpol(int points[][3], float*** gradient, int nb_points, int nb_
 			(*gradient)[count][1] = (gslope * j + points[i][1])/255.;
 			(*gradient)[count][2] = (bslope * j + points[i][2])/255.;
 			count++;
-			printf("%d %d\n", i, j);
 		}
 	}
 }
@@ -104,7 +108,18 @@ void moveAround(GLFWwindow* window, long double* xmin, long double* xmax, long d
 }
 
 
-int main() {
+int main(int argc, char** argv) {
+
+
+	for (int arg = 1; arg < argc; arg++) {
+		if (!strncmp("-w", argv[arg], 2)) {
+			width = (int) strtol(argv[arg+1], NULL, 10);
+		}
+		else if (!strncmp("-h", argv[arg], 2)) {
+			height = (int) strtol(argv[arg+1], NULL, 10);
+		}
+	}
+
 
 	GLFWwindow* window;
 
@@ -119,7 +134,7 @@ int main() {
 			count += 3;
 		}
 	}
-
+	
 	if (!glfwInit()) {
 		printf("Erreur initialisation\n");
 		return -1;
@@ -151,10 +166,10 @@ int main() {
 	glfwSwapInterval(0);
 
 
-	long double complex c; 
+	long double complex c;
 
 	long double xmin = -1.9;
-	long double xmax = -1.888;	
+	long double xmax = -1.888;
 	long double ymax = (height/(long double)width) * (xmax - xmin)/2;
 	long double ymin = - ymax;
 
@@ -166,9 +181,9 @@ int main() {
 	int gradient_points[][3] = {
 		{66, 30, 1},
 		{25, 7, 26},
-		{9,   1,  47},
-		{4,   4,  73},
-		{  0,   7, 100},
+		{9,   120,  47},
+		{4,   230,  73},
+		{  0,   100, 100},
 		{ 12,  44, 138},
 		{ 24,  82, 177},
 		{57, 125, 209},
@@ -176,10 +191,11 @@ int main() {
 		{211, 236, 248},
 		{241, 233, 191},
 		{248, 201,  95},
-		{255, 170,   0},
-		{204, 128,   0},
-		{153,  87,   0},
-		{106,  52,   3}};
+		{255, 20,   0},
+		{204, 10,   0},
+		{34,  7,   230},
+		{50,  52,  120}
+	};
 
 	float ** gradient;
 	int nb_cols = 16;
@@ -197,6 +213,7 @@ int main() {
 	double prevmouseX = 0;
 	double prevmouseY = 0;
 	glRasterPos2i(-1, -1);
+
 	while (!glfwWindowShouldClose(window)) {
 
 		prevmouseX = mouseX;
@@ -215,7 +232,9 @@ int main() {
 			for (int j = 0; j < width; j++) {
 				c = xmin + j * xscale + I * (ymin + i * yscale);
 				iter = mandelbrotFunc(&c, max_n) * interp_size;
-				nu = log2(log2(sqrt((double)(cimagl(c)*cimagl(c) + creall(c) * creall(c)))));
+				long double c_r = creall(c);
+				long double c_i = cimagl(c);
+				nu = log2(log2(sqrt((double)(c_r * c_r + c_i * c_i))));
 				frac = (1-nu)*interp_size;
 				if (isnanf(frac)) {
 					frac = 0.;
@@ -234,8 +253,6 @@ int main() {
 		glfwPollEvents();
 		printMsPerFrame(&LastTime, &nbFrames);
 	}
-
-
 
 	glfwDestroyWindow(window);
 	glfwTerminate();
