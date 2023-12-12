@@ -23,3 +23,5 @@ make
 ```
 # Showcase
 ![Mandelbrot](./rcs/mandelbrot.jpg)
+
+![Mandelbrot2](./rcs/mandelbrot2.jpg)
