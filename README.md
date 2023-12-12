@@ -4,9 +4,9 @@ A small program to view the Mandelbrot set.
 
 # Features
 
-- [ ] Moving and zooming around with the mouse
-- [ ] Coloring
-- [ ] Smooth coloring
+- [x] Moving and zooming around with the mouse (almost)
+- [x] Coloring (almost)
+- [x] Smooth coloring (almost)
 
 # Requirements
 
@@ -21,3 +21,5 @@ git clone https://github.com/Elloim/MandelbrotViewer.git
 cd MandelbrotViewer
 make
 ```
+# Showcase
+![Mandelbrot](./rcs/mandelbrot.jpg)

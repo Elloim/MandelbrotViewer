@@ -112,6 +112,7 @@ void gradientInterpol(int points[][3], float*** gradient, int nb_points, int nb_
 
 }
 
+
 int main() {
 
 	GLuint frameBuffer;
@@ -165,16 +166,18 @@ int main() {
 
 	long double complex c; 
 
-	long double xmin = -1.89999999;
-	long double xmax = -1.89999998;
+	long double xmin = -2.;
+	long double xmax = -0.5;
 	
 	long double ymax = (height/(long double)width) * (xmax - xmin)/2;
 	printf("ymax: %Lf\n", ymax);
 	long double ymin = - ymax;
 	long double zoomX = 1.;
 	long double zoomY = 1.;
+	long double offsetX = 0.;
+	long double offsetY = 0.;
 
-	int max_n = 5000;
+	int max_n = 1000;
 
 	long double xscale = (xmax - xmin) / width;
 	long double yscale = (ymax - ymin) / height;
@@ -198,47 +201,57 @@ int main() {
 		{106,  52,   3}};
 
 	float ** gradient;
-	int size_grad = 15*256;
-	gradientInterpol(gradient_points, &gradient, 16, 256);
-	//printf("grd : %f\n", gradient[0][0]);
-
-	for (int i = 0; i < size_grad; i++) {
-		printf("%d | r : %f g : %f b : %f\n", i, gradient[i][0], gradient[i][1], gradient[i][2]);
-	}
+	int nb_cols = 16;
+	int interp_size = 256;
+	int size_grad = (nb_cols-1) * interp_size;
+	gradientInterpol(gradient_points, &gradient, nb_cols, interp_size);
 
 
 	double LastTime = glfwGetTime();
 	int nbFrames = 0;
 	double nu;
-	int cols[3];
 	int iter = 0;
 	float frac = 0;
+	double mouseX = 0;
+	double mouseY = 0;
 	glRasterPos2i(-1, -1);
 	while (!glfwWindowShouldClose(window)) {
 
 		glfwGetFramebufferSize(window, &width, &height);
+		glfwGetCursorPos(window, &mouseX, &mouseY);
 		glClear(GL_COLOR_BUFFER_BIT);
 
+		if (glfwGetMouseButton(window, 0)) {
+			offsetX = (mouseX - (width/2)) * xscale;
+			offsetY = -(mouseY - (height/2)) * yscale;
+			xmin += offsetX + (xmax - xmin)/10;
+			xmax += offsetX - (xmax - xmin)/10;
+			ymin += offsetY + (ymax - ymin)/10;
+			ymax += offsetY - (ymax - ymin)/10;
+		}
+
+		printf("Offx : %Lf, Offy : %Lf\n", offsetX, offsetY);
 
 		xscale = (xmax - xmin) / (width);
 		yscale = (ymax - ymin) / (height);
 		zoomX *= 1.01;
 		zoomY *= 1.01;
 
+
 		count = 0;
 		for (int i = 0; i < height; i++) {
 			for (int j = 0; j < width; j++) {
 				c = xmin + j * xscale + I * (ymin + i * yscale);
-				iter = mandelbrotFunc(&c, max_n);
+				iter = mandelbrotFunc(&c, max_n) * interp_size;
 				nu = log2(log2(sqrt((double)(cimagl(c)*cimagl(c) + creall(c) * creall(c)))));
-				frac = (1-nu)*256;
+				frac = (1-nu)*interp_size;
 				if (isnanf(frac)) {
 					frac = 0.;
 				}
 
-				data[count] = gradient[(iter*256 + abs((int)frac)) %size_grad][0];
-				data[count+1] = gradient[(iter*256 +abs((int)frac)) %size_grad][1];
-				data[count+2] = gradient[(iter*256+abs((int)frac))%size_grad][2];
+				data[count] = gradient[(iter + abs((int)frac)) %size_grad][0];
+				data[count+1] = gradient[(iter +abs((int)frac)) %size_grad][1];
+				data[count+2] = gradient[(iter+abs((int)frac))%size_grad][2];
 
 				count += 3;
 			}
