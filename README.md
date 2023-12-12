@@ -4,9 +4,10 @@ A small program to view the Mandelbrot set.
 
 # Features
 
-- [x] Moving and zooming around with the mouse (almost)
-- [x] Coloring (almost)
+- [x] Moving and zooming around with the mouse
+- [x] Coloring
 - [x] Smooth coloring (almost)
+- [x] Autolag is on by default
 
 # Requirements
 
