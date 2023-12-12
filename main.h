@@ -14,23 +14,15 @@
 
 // Definition fonctions
 
-char* loadShaderContent(const char* filename);
-
-void cameraRotate(float delta);
-
-void mouse_callback(GLFWwindow* window, double nxpos, double nypos);
-
-void cameraTranslate(vec3 translation, float delta);
-
-void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
-
 void error_callback(int error, const char* description);
 
 void printMsPerFrame(double* LastTime, int* nbFrames);
 
-int mandelbrotFunc(long double complex c, int max_n);
+int mandelbrotFunc(long double complex* c, int max_n);
 
-void gradientInterpol(int points[][3], float** gradient, int nb_points, int nb_gradients);
+void gradientInterpol(int points[][3], float*** gradient, int nb_points, int nb_gradients);
+
+void moveAround(GLFWwindow* window, long double* xmin, long double* xmax, long double* ymin, long double *ymax, long double xscale, long double yscale, double prevmouseX, double prevmouseY, double mouseX, double mouseY);
 
 // Definition variables globales
 

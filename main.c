@@ -18,44 +18,9 @@
 
 #include "main.h"
 
-char* loadShaderContent(const char* filename) {
-	FILE * file;
-	long size;
-	char* shaderContent;
-
-	file = fopen(filename, "rb");
-	if (file == NULL) {
-		fprintf(stderr, "Error loading shader from file %s\n", filename);
-		return "";
-	}
-
-	fseek(file, 0L, SEEK_END);
-	size  = ftell(file) + 1;
-	printf("Size : %lo\n", size);
-	fclose(file);
-
-	file = fopen(filename, "r");
-
-	shaderContent = memset(malloc(size), '\0', size);
-	if (!fread(shaderContent, 1, size-1, file)) {
-		fprintf(stderr, "Error loading shader from file %s : fread failed\n", filename);
-	}
-	fclose(file);
-
-	printf("%s\n", shaderContent);
-
-	return shaderContent;
-}
 
 void error_callback(int error, const char* description) {
 	fprintf(stderr, "Erreur num %d : %s\n", error, description);
-}
-
-
-void mouse_callback(GLFWwindow* window, double nxpos, double nypos) {
-}
-
-void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
 }
 
 void printMsPerFrame(double* LastTime, int* nbFrames) {
@@ -89,7 +54,6 @@ int mandelbrotFunc(long double complex* c, int max_n) {
 }
 
 void gradientInterpol(int points[][3], float*** gradient, int nb_points, int nb_gradient) {
-
 	*gradient = (float**) malloc(sizeof(float*) * nb_gradient * nb_points);
 
 	float rslope = 0;
@@ -109,13 +73,40 @@ void gradientInterpol(int points[][3], float*** gradient, int nb_points, int nb_
 			printf("%d %d\n", i, j);
 		}
 	}
+}
 
+void moveAround(GLFWwindow* window, long double* xmin, long double* xmax, long double* ymin, long double *ymax, long double xscale, long double yscale, double prevmouseX, double prevmouseY, double mouseX, double mouseY) {
+
+	if (glfwGetMouseButton(window, 0)) {
+		long double offsetX = (prevmouseX - mouseX) * xscale;
+		long double offsetY = -(prevmouseY - mouseY) * yscale;
+		*xmin += offsetX; 
+		*xmax += offsetX;
+		*ymin += offsetY;
+		*ymax += offsetY;
+	}
+
+	if (glfwGetMouseButton(window, 1)) {
+		long double xlength = (*xmax - *xmin) / 10;
+		long double ylength = (*ymax - *ymin) / 10;
+		*xmin += -xlength;
+		*xmax += xlength;
+		*ymin += -ylength;
+		*ymax += ylength;
+	}
+
+	if (glfwGetMouseButton(window, 2)) {
+		long double xlength = (*xmax - *xmin)/10;
+		long double ylength = (*ymax - *ymin)/10;
+		*xmin += xlength;
+		*xmax += -xlength;
+		*ymin += ylength;
+		*ymax += -ylength;
+	}
 }
 
 
 int main() {
-
-	GLuint frameBuffer;
 
 	GLFWwindow* window;
 
@@ -158,24 +149,16 @@ int main() {
 	glEnable(GL_FRAMEBUFFER_SRGB);
 
 	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-	glfwSetCursorPosCallback(window, mouse_callback);
-	glfwSetKeyCallback(window, key_callback);
 
 	glfwSwapInterval(0);
 
 
 	long double complex c; 
 
-	long double xmin = -2.;
-	long double xmax = -0.5;
-	
+	long double xmin = -1.9;
+	long double xmax = -1.888;	
 	long double ymax = (height/(long double)width) * (xmax - xmin)/2;
-	printf("ymax: %Lf\n", ymax);
 	long double ymin = - ymax;
-	long double zoomX = 1.;
-	long double zoomY = 1.;
-	long double offsetX = 0.;
-	long double offsetY = 0.;
 
 	int max_n = 1000;
 
@@ -206,7 +189,6 @@ int main() {
 	int size_grad = (nb_cols-1) * interp_size;
 	gradientInterpol(gradient_points, &gradient, nb_cols, interp_size);
 
-
 	double LastTime = glfwGetTime();
 	int nbFrames = 0;
 	double nu;
@@ -214,29 +196,21 @@ int main() {
 	float frac = 0;
 	double mouseX = 0;
 	double mouseY = 0;
+	double prevmouseX = 0;
+	double prevmouseY = 0;
 	glRasterPos2i(-1, -1);
 	while (!glfwWindowShouldClose(window)) {
 
+		prevmouseX = mouseX;
+		prevmouseY = mouseY;
 		glfwGetFramebufferSize(window, &width, &height);
 		glfwGetCursorPos(window, &mouseX, &mouseY);
 		glClear(GL_COLOR_BUFFER_BIT);
 
-		if (glfwGetMouseButton(window, 0)) {
-			offsetX = (mouseX - (width/2)) * xscale;
-			offsetY = -(mouseY - (height/2)) * yscale;
-			xmin += offsetX + (xmax - xmin)/10;
-			xmax += offsetX - (xmax - xmin)/10;
-			ymin += offsetY + (ymax - ymin)/10;
-			ymax += offsetY - (ymax - ymin)/10;
-		}
-
-		printf("Offx : %Lf, Offy : %Lf\n", offsetX, offsetY);
+		moveAround(window, &xmin, &xmax, &ymin, &ymax, xscale, yscale, prevmouseX, prevmouseY, mouseX, mouseY);
 
 		xscale = (xmax - xmin) / (width);
 		yscale = (ymax - ymin) / (height);
-		zoomX *= 1.01;
-		zoomY *= 1.01;
-
 
 		count = 0;
 		for (int i = 0; i < height; i++) {
@@ -249,9 +223,9 @@ int main() {
 					frac = 0.;
 				}
 
-				data[count] = gradient[(iter + abs((int)frac)) %size_grad][0];
-				data[count+1] = gradient[(iter +abs((int)frac)) %size_grad][1];
-				data[count+2] = gradient[(iter+abs((int)frac))%size_grad][2];
+				data[count] = gradient[(iter + (int)frac) % size_grad][0];
+				data[count+1] = gradient[(iter + (int)frac) % size_grad][1];
+				data[count+2] = gradient[(iter + (int)frac) % size_grad][2];
 
 				count += 3;
 			}
