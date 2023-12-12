@@ -25,3 +25,5 @@ make
 ![Mandelbrot](./rcs/mandelbrot.jpg)
 
 ![Mandelbrot2](./rcs/mandelbrot2.jpg)
+
+![Mandelbrot3](./rcs/mandelbrot3.jpg)
