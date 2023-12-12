@@ -69,7 +69,7 @@ void printMsPerFrame(double* LastTime, int* nbFrames) {
 	}
 }
 
-int mandelbrotFunc(long double complex c, int max_n) {
+int mandelbrotFunc(long double complex* c, int max_n) {
 
 	int n = 0;
 	long double complex z = 0. + 0. * I;
@@ -80,31 +80,36 @@ int mandelbrotFunc(long double complex c, int max_n) {
 			break;
 		}
 
-		z = z*z + c;
+		z = z*z + *c;
 		n++;
 	}
 
-
+	*c = z;
 	return n;
 }
 
-void gradientInterpol(int points[][3], float** gradient, int nb_points, int nb_gradient) {
+void gradientInterpol(int points[][3], float*** gradient, int nb_points, int nb_gradient) {
 
-	gradient = (float**) malloc(sizeof(float*) * nb_gradient * nb_points);
-	printf("ddd : %f\n", gradient[0][0]);
+	*gradient = (float**) malloc(sizeof(float*) * nb_gradient * nb_points);
+
 	float rslope = 0;
 	float gslope = 0;
 	float bslope = 0;
+	int count = 0;
 	for (int i = 0; i < nb_points-1; i++) {
 		rslope = (float) (points[i+1][0] - points[i][0]) / nb_gradient;
 		gslope = (float) (points[i+1][1] - points[i][1]) / nb_gradient;
 		bslope = (float) (points[i+1][2] - points[i][2]) / nb_gradient;
 		for (int j = 0; j < nb_gradient; j++) {
-			gradient[i+j] = (float*) malloc(sizeof(float) * 3);
-			gradient[i+j][0] = (rslope * j + points[i][0])/255.;
-			gradient[i+j][1] = (gslope * j + points[i][1])/255.;
-			gradient[i+j][2] = (bslope * j + points[i][2])/255.;		}
+			(*gradient)[count] = (float*) malloc(sizeof(float) * 3);
+			(*gradient)[count][0] = (rslope * j + points[i][0])/255.;
+			(*gradient)[count][1] = (gslope * j + points[i][1])/255.;
+			(*gradient)[count][2] = (bslope * j + points[i][2])/255.;
+			count++;
+			printf("%d %d\n", i, j);
+		}
 	}
+
 }
 
 int main() {
@@ -160,18 +165,21 @@ int main() {
 
 	long double complex c; 
 
-	long double xmin = -1.;
-	long double xmax = 0.5;
+	long double xmin = -1.89999999;
+	long double xmax = -1.89999998;
+	
 	long double ymax = (height/(long double)width) * (xmax - xmin)/2;
 	printf("ymax: %Lf\n", ymax);
 	long double ymin = - ymax;
+	long double zoomX = 1.;
+	long double zoomY = 1.;
 
-	int max_n = 100;
+	int max_n = 5000;
 
 	long double xscale = (xmax - xmin) / width;
 	long double yscale = (ymax - ymin) / height;
 
-	int gradient[][3] = {
+	int gradient_points[][3] = {
 		{66, 30, 1},
 		{25, 7, 26},
 		{9,   1,  47},
@@ -189,38 +197,49 @@ int main() {
 		{153,  87,   0},
 		{106,  52,   3}};
 
-	//float ** gradient;
-	int size_grad = 16;
-	//gradientInterpol(gradient_points, gradient, 16, 128);
+	float ** gradient;
+	int size_grad = 15*256;
+	gradientInterpol(gradient_points, &gradient, 16, 256);
 	//printf("grd : %f\n", gradient[0][0]);
+
+	for (int i = 0; i < size_grad; i++) {
+		printf("%d | r : %f g : %f b : %f\n", i, gradient[i][0], gradient[i][1], gradient[i][2]);
+	}
+
 
 	double LastTime = glfwGetTime();
 	int nbFrames = 0;
-	double smoothed;
+	double nu;
 	int cols[3];
 	int iter = 0;
+	float frac = 0;
 	glRasterPos2i(-1, -1);
 	while (!glfwWindowShouldClose(window)) {
 
 		glfwGetFramebufferSize(window, &width, &height);
 		glClear(GL_COLOR_BUFFER_BIT);
 
-		xscale = (xmax - xmin) / width;
-		yscale = (ymax - ymin) / height;
+
+		xscale = (xmax - xmin) / (width);
+		yscale = (ymax - ymin) / (height);
+		zoomX *= 1.01;
+		zoomY *= 1.01;
 
 		count = 0;
 		for (int i = 0; i < height; i++) {
 			for (int j = 0; j < width; j++) {
-				c = -xmax + j * xscale + I * (ymin + i * yscale);
+				c = xmin + j * xscale + I * (ymin + i * yscale);
+				iter = mandelbrotFunc(&c, max_n);
+				nu = log2(log2(sqrt((double)(cimagl(c)*cimagl(c) + creall(c) * creall(c)))));
+				frac = (1-nu)*256;
+				if (isnanf(frac)) {
+					frac = 0.;
+				}
 
-				//float color = mandelbrotFunc(c, max_n)/ (float)max_n;
-				//smoothed = log2(log2((double)cimagl(c)*cimagl(c) + creall(c) * creall(c)) / 2);
-				//memcpy((void *)cols, (const void *) gradient[(mandelbrotFunc(c, max_n)) % 16], sizeof(int) * 3);
+				data[count] = gradient[(iter*256 + abs((int)frac)) %size_grad][0];
+				data[count+1] = gradient[(iter*256 +abs((int)frac)) %size_grad][1];
+				data[count+2] = gradient[(iter*256+abs((int)frac))%size_grad][2];
 
-				iter = mandelbrotFunc(c, max_n);
-				data[count] = gradient[iter%size_grad][0]/255.;
-				data[count+1] = gradient[iter%size_grad][1]/255.;
-				data[count+2] = gradient[iter%size_grad][2]/255.;
 				count += 3;
 			}
 		}
@@ -232,7 +251,6 @@ int main() {
 	}
 
 
-	printf("%d\n", mandelbrotFunc(c, 1000));
 
 	glfwDestroyWindow(window);
 	glfwTerminate();
