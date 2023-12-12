@@ -13,8 +13,6 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include <GL/glew.h>
-#include <cglm/cglm.h>
-#include <cglm/mat4.h>
 
 #include "main.h"
 
