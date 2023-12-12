@@ -22,6 +22,9 @@ cd MandelbrotViewer
 make
 ```
 # Showcase
+
+![Mandelbrotgif](./rcs/Mandelbrot.gif)
+
 ![Mandelbrot](./rcs/mandelbrot.jpg)
 
 ![Mandelbrot2](./rcs/mandelbrot2.jpg)
