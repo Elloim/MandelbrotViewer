@@ -123,7 +123,7 @@ void thread(float ** gradient, float * data, long double xscale, long double ysc
 	long double nu;
 	long double complex c;
 	
-	for (int i = line_start; i < line_start + (height/10); i++) {
+	for (int i = line_start; i < line_start + (height/24); i++) {
 		for (int j = 0; j < width; j++) {
 			c = xmin + j * xscale + I * (ymin + i * yscale);
 			iter = mandelbrotFunc(&c, max_n) * interp_size;
@@ -247,7 +247,7 @@ int main(int argc, char** argv) {
 	double prevmouseY = 0;
 	glRasterPos2i(-1, -1);
 	
-	int num_threads = 10;
+	int num_threads = 24;
 	pthread_t threads[num_threads];
 	args_t arguments[num_threads];
 

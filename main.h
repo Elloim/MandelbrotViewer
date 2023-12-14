@@ -42,8 +42,8 @@ void * createThread(void * args);
 void thread(float ** gradient, float * data, long double xscale, long double yscale, long double xmin, long double ymin, int interp_size, int size_grad, int max_n, int start, int line_start);
 
 // Definition variables globales
-int width = 1600;
-int height = 1000;
+int width = 1440;
+int height = 816;
 
 
 #endif
