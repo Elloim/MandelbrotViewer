@@ -9,6 +9,8 @@
 #include <string.h>
 #include <math.h>
 #include <complex.h>
+#include <unistd.h>
+#include <pthread.h>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -107,6 +109,40 @@ void moveAround(GLFWwindow* window, long double* xmin, long double* xmax, long d
 	}
 }
 
+void * createThread(void * args) {
+	args_t * vals = args;
+	thread(vals -> gradient, vals -> data, vals -> xscale, vals -> yscale, vals -> xmin, vals -> ymin, vals -> interp_size, vals -> size_grad, vals -> max_n, vals -> start, vals -> line_start);
+	pthread_exit(NULL);
+}
+
+void thread(float ** gradient, float * data, long double xscale, long double yscale, long double xmin, long double ymin, int interp_size, int size_grad, int max_n, int start, int line_start) {
+	
+	int count = start;
+	int iter = 0;
+	float frac;
+	long double nu;
+	long double complex c;
+	
+	for (int i = line_start; i < line_start + (height/10); i++) {
+		for (int j = 0; j < width; j++) {
+			c = xmin + j * xscale + I * (ymin + i * yscale);
+			iter = mandelbrotFunc(&c, max_n) * interp_size;
+			long double c_r = creall(c);
+			long double c_i = cimagl(c);
+			nu = log2(log2(sqrt((double)(c_r * c_r + c_i * c_i))));
+			frac = (1-nu)*interp_size;
+			if (isnanf(frac)) {
+				frac = 0.;
+			}
+
+			data[count] = gradient[(iter + (int)frac) % size_grad][0];
+			data[count+1] = gradient[(iter + (int)frac) % size_grad][1];
+			data[count+2] = gradient[(iter + (int)frac) % size_grad][2];
+
+			count += 3;
+		}
+	}
+}
 
 int main(int argc, char** argv) {
 
@@ -123,7 +159,7 @@ int main(int argc, char** argv) {
 
 	GLFWwindow* window;
 
-	float* data = (float*) malloc(sizeof(float) * width * height * 3);
+	float * data = (float*) malloc(sizeof(float) * width * height * 3);
 
 	int count = 0;
 	for (int i = 0; i < height; i++) {
@@ -134,7 +170,7 @@ int main(int argc, char** argv) {
 			count += 3;
 		}
 	}
-	
+
 	if (!glfwInit()) {
 		printf("Erreur initialisation\n");
 		return -1;
@@ -147,6 +183,7 @@ int main(int argc, char** argv) {
 	if (!window) {
 		printf("Erreur creation contexte\n");
 		return -1;
+
 	}
 
 	glfwMakeContextCurrent(window);
@@ -165,15 +202,12 @@ int main(int argc, char** argv) {
 
 	glfwSwapInterval(0);
 
-
-	long double complex c;
-
 	long double xmin = -1.9;
 	long double xmax = -1.888;
 	long double ymax = (height/(long double)width) * (xmax - xmin)/2;
 	long double ymin = - ymax;
 
-	int max_n = 1000;
+	int max_n = 500;
 
 	long double xscale = (xmax - xmin) / width;
 	long double yscale = (ymax - ymin) / height;
@@ -196,7 +230,6 @@ int main(int argc, char** argv) {
 		{34,  7,   230},
 		{50,  52,  120}
 	};
-
 	float ** gradient;
 	int nb_cols = 16;
 	int interp_size = 256;
@@ -213,6 +246,11 @@ int main(int argc, char** argv) {
 	double prevmouseX = 0;
 	double prevmouseY = 0;
 	glRasterPos2i(-1, -1);
+	
+	int num_threads = 10;
+	pthread_t threads[num_threads];
+	args_t arguments[num_threads];
+
 
 	while (!glfwWindowShouldClose(window)) {
 
@@ -227,25 +265,30 @@ int main(int argc, char** argv) {
 		xscale = (xmax - xmin) / (width);
 		yscale = (ymax - ymin) / (height);
 
-		count = 0;
-		for (int i = 0; i < height; i++) {
-			for (int j = 0; j < width; j++) {
-				c = xmin + j * xscale + I * (ymin + i * yscale);
-				iter = mandelbrotFunc(&c, max_n) * interp_size;
-				long double c_r = creall(c);
-				long double c_i = cimagl(c);
-				nu = log2(log2(sqrt((double)(c_r * c_r + c_i * c_i))));
-				frac = (1-nu)*interp_size;
-				if (isnanf(frac)) {
-					frac = 0.;
-				}
+		for (int i = 0; i < num_threads; i++) {
+			
+			arguments[i].gradient = gradient;
+			arguments[i].data = data;
+			arguments[i].xscale = xscale;
+			arguments[i].yscale = yscale;
+			arguments[i].xmin = xmin;
+			arguments[i].ymin = ymin;
+			arguments[i].interp_size = interp_size;
+			arguments[i].size_grad = size_grad;
+			arguments[i].max_n = max_n;
+			arguments[i].start = (width * height) / num_threads * i * 3;
+			arguments[i].line_start = i * (height / num_threads);
 
-				data[count] = gradient[(iter + (int)frac) % size_grad][0];
-				data[count+1] = gradient[(iter + (int)frac) % size_grad][1];
-				data[count+2] = gradient[(iter + (int)frac) % size_grad][2];
+			int rc = pthread_create(&threads[i], NULL, createThread, (void*)&arguments[i]);
 
-				count += 3;
+			if (rc) {
+				fprintf(stderr, "Erreur initialisation thread : %d\n", i);
+				return -1;
 			}
+		}
+
+		for (int i = 0; i < num_threads; i++) {
+			pthread_join(threads[i], NULL);
 		}
 
 		glDrawPixels(width, height, GL_RGB, GL_FLOAT, data);		

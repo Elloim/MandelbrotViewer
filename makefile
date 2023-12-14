@@ -1,6 +1,6 @@
 CC=gcc
 COPTIONS=-Wall -Wextra -g -O3
-OPENGL=-lGL -lGLU -lglut -lGLEW -lglfw -lX11 -lXxf86vm -lXrandr -lpthread -lXi -ldl -lXinerama -lXcursor
+OPENGL=-lGL -lGLU -lglut -lGLEW -lglfw -lX11 -lXxf86vm -lXrandr -lpthread -lXi -ldl -lXinerama -lXcursor -lpthread
 OBJECTS=main.o
 
 prog:main.o

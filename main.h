@@ -1,3 +1,4 @@
+
 /*
  * name : main.h
  * auteur : PETIT Eloi
@@ -10,7 +11,19 @@
 #define pi 3.14159
 
 // Definition struct
-
+typedef struct args_t {
+	float ** gradient;
+	float * data;
+	long double xscale;
+	long double yscale;
+	long double xmin;
+	long double ymin;
+	int interp_size;
+	int size_grad;
+	int max_n;
+	int start;
+	int line_start;
+} args_t;
 
 // Definition fonctions
 
@@ -24,10 +37,15 @@ void gradientInterpol(int points[][3], float*** gradient, int nb_points, int nb_
 
 void moveAround(GLFWwindow* window, long double* xmin, long double* xmax, long double* ymin, long double *ymax, long double xscale, long double yscale, double prevmouseX, double prevmouseY, double mouseX, double mouseY);
 
+void * createThread(void * args);
+
+void thread(float ** gradient, float * data, long double xscale, long double yscale, long double xmin, long double ymin, int interp_size, int size_grad, int max_n, int start, int line_start);
+
 // Definition variables globales
-int width = 1000;
-int height = 600;
+int width = 1600;
+int height = 1000;
 
 
 #endif
+
  
