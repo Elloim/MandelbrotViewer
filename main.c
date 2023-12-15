@@ -34,7 +34,7 @@ void printMsPerFrame(double* LastTime, int* nbFrames) {
 	}
 }
 
-int mandelbrotFunc(long double complex* c, int max_n) {
+int mandelbrotFunc(long double * c_r, long double * c_i, int max_n) {
 
 	int n = 0;
 
@@ -43,18 +43,16 @@ int mandelbrotFunc(long double complex* c, int max_n) {
 	long double x = 0.;
 	long double y = 0.;
 
-	long double x0 = creall(*c);
-	long double y0 = cimagl(*c);
-
 	while (n < max_n && x2 + y2 < 4) {
-		y = 2 * x * y + y0;
-		x = x2 - y2 + x0;
+		y = 2 * x * y + *c_i;
+		x = x2 - y2 + *c_r;
 		x2 = x * x;
 		y2 = y * y;
 		n++;
 	}
 
-	*c = x + y * I;
+	*c_r = x;
+	*c_i = y;
 	return n;
 }
 
@@ -120,16 +118,16 @@ void thread(float ** gradient, float * data, long double xscale, long double ysc
 	int count = start;
 	int iter = 0;
 	float frac;
-	long double nu;
-	long double complex c;
+	float nu;
+	long double c_r;
+	long double c_i;
 	
-	for (int i = line_start; i < line_start + (height/24); i++) {
+	for (int i = line_start; i < line_start + (height/16); i++) {
 		for (int j = 0; j < width; j++) {
-			c = xmin + j * xscale + I * (ymin + i * yscale);
-			iter = mandelbrotFunc(&c, max_n) * interp_size;
-			long double c_r = creall(c);
-			long double c_i = cimagl(c);
-			nu = log2(log2(sqrt((double)(c_r * c_r + c_i * c_i))));
+			c_r = xmin + j * xscale;
+			c_i = ymin + i * yscale;
+			iter = mandelbrotFunc(&c_r, &c_i, max_n) * interp_size;	
+			nu = log2f(log2f(sqrtf((float)(c_r * c_r + c_i * c_i))));
 			frac = (1-nu)*interp_size;
 			if (isnanf(frac)) {
 				frac = 0.;
@@ -247,7 +245,7 @@ int main(int argc, char** argv) {
 	double prevmouseY = 0;
 	glRasterPos2i(-1, -1);
 	
-	int num_threads = 24;
+	int num_threads = 16;
 	pthread_t threads[num_threads];
 	args_t arguments[num_threads];
 

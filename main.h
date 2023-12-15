@@ -1,4 +1,3 @@
-
 /*
  * name : main.h
  * auteur : PETIT Eloi
@@ -31,7 +30,7 @@ void error_callback(int error, const char* description);
 
 void printMsPerFrame(double* LastTime, int* nbFrames);
 
-int mandelbrotFunc(long double complex* c, int max_n);
+int mandelbrotFunc(long double * c_r, long double * c_i, int max_n);
 
 void gradientInterpol(int points[][3], float*** gradient, int nb_points, int nb_gradients);
 
