@@ -16,6 +16,44 @@
 
 #include "main.h"
 
+float verts[] = {
+	-1, -1, 0.,
+	1., -1, 0.,
+	-1., 1., 0.,
+	1., -1., 0.,
+	1., 1., 0.,
+	-1., 1., 0.
+};
+
+char* loadShaderContent(const char* filename) {
+	FILE * file;
+	long size;
+	char* shaderContent;
+
+	file = fopen(filename, "rb");
+	if (file == NULL) {
+		fprintf(stderr, "Error loading shader from file %s\n", filename);
+		return "";
+	}
+	
+	fseek(file, 0L, SEEK_END);
+	size  = ftell(file) + 1;
+	printf("Size : %lo\n", size);
+	fclose(file);
+
+	file = fopen(filename, "r");
+
+	shaderContent = memset(malloc(size), '\0', size);
+	if (!fread(shaderContent, 1, size-1, file)) {
+		fprintf(stderr, "Error loading shader from file %s : fread failed\n", filename);
+	}
+	fclose(file);
+
+	printf("%s\n", shaderContent);
+	
+	return shaderContent;
+}
+
 
 void error_callback(int error, const char* description) {
 	fprintf(stderr, "Erreur num %d : %s\n", error, description);
@@ -163,7 +201,7 @@ int main(int argc, char** argv) {
 
 	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 
-	glfwSwapInterval(0);
+	glfwSwapInterval(1);
 
 
 	long double complex c;
@@ -212,7 +250,66 @@ int main(int argc, char** argv) {
 	double mouseY = 0;
 	double prevmouseX = 0;
 	double prevmouseY = 0;
-	glRasterPos2i(-1, -1);
+
+	// OpenGL shaders
+	GLuint vbo, vao;
+	GLint shader_status;
+
+	glGenVertexArrays(1, &vao);
+	glBindVertexArray(vao);
+
+	glGenBuffers(1, &vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
+
+	// Loading shaders
+	const char * vertex_shader_text = (const char *) loadShaderContent(vertexFilename);
+	GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
+	glShaderSource(vertexShader, 1, &vertex_shader_text, NULL);
+	glCompileShader(vertexShader);
+	
+	glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &shader_status);
+	if (shader_status == GL_FALSE) {
+		fprintf(stderr, "Erreur compilation shader vertex\n");
+		glfwDestroyWindow(window);
+		glfwTerminate();
+		return -1;
+	}
+
+	const char * fragment_shader_text = (const char *) loadShaderContent(fragmentFilename);
+	GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+	glShaderSource(fragmentShader, 1, &fragment_shader_text, NULL);
+	glCompileShader(fragmentShader);
+
+	glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &shader_status);
+	if (shader_status == GL_FALSE) {
+		fprintf(stderr, "Erreur compilation fragent shader\n");
+		glfwDestroyWindow(window);
+		glfwTerminate();
+		return -1;
+	}
+
+	glBindVertexArray(vao);
+	GLuint shaderProgram = glCreateProgram();
+	glAttachShader(shaderProgram, vertexShader);
+	glAttachShader(shaderProgram, fragmentShader);
+	glLinkProgram(shaderProgram);
+	glUseProgram(shaderProgram);
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+	GLuint posAttrib = glGetAttribLocation(shaderProgram, "position");
+	glEnableVertexAttribArray(posAttrib);
+	glVertexAttribPointer(posAttrib, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), 0);
+
+
+	GLuint uniXmin = glGetUniformLocation(shaderProgram, "xmin");
+	GLuint uniXmax = glGetUniformLocation(shaderProgram, "xmax");
+	GLuint uniYmin = glGetUniformLocation(shaderProgram, "ymin");
+	GLuint uniYmax = glGetUniformLocation(shaderProgram, "ymax");
+
+	GLuint uniScalex = glGetUniformLocation(shaderProgram, "scalex");
+	GLuint uniScaley = glGetUniformLocation(shaderProgram, "scaley");
+
 
 	while (!glfwWindowShouldClose(window)) {
 
@@ -220,35 +317,25 @@ int main(int argc, char** argv) {
 		prevmouseY = mouseY;
 		glfwGetFramebufferSize(window, &width, &height);
 		glfwGetCursorPos(window, &mouseX, &mouseY);
+		glClearColor(0., 0., 0., 1.);
 		glClear(GL_COLOR_BUFFER_BIT);
+		glViewport(0, 0, width, height);
 
 		moveAround(window, &xmin, &xmax, &ymin, &ymax, xscale, yscale, prevmouseX, prevmouseY, mouseX, mouseY);
 
 		xscale = (xmax - xmin) / (width);
 		yscale = (ymax - ymin) / (height);
 
-		count = 0;
-		for (int i = 0; i < height; i++) {
-			for (int j = 0; j < width; j++) {
-				c = xmin + j * xscale + I * (ymin + i * yscale);
-				iter = mandelbrotFunc(&c, max_n) * interp_size;
-				long double c_r = creall(c);
-				long double c_i = cimagl(c);
-				nu = log2(log2(sqrt((double)(c_r * c_r + c_i * c_i))));
-				frac = (1-nu)*interp_size;
-				if (isnanf(frac)) {
-					frac = 0.;
-				}
+		glUseProgram(shaderProgram);
+		glBindVertexArray(vao);
+		glUniform1d(uniXmin, xmin);
+		glUniform1d(uniXmax, xmax);
+		glUniform1d(uniYmin, ymin);
+		glUniform1d(uniYmax, ymax);
+		glUniform1d(uniScalex, xscale);
+		glUniform1d(uniScaley, yscale);
+		glDrawArrays(GL_TRIANGLES, 0, 6);
 
-				data[count] = gradient[(iter + (int)frac) % size_grad][0];
-				data[count+1] = gradient[(iter + (int)frac) % size_grad][1];
-				data[count+2] = gradient[(iter + (int)frac) % size_grad][2];
-
-				count += 3;
-			}
-		}
-
-		glDrawPixels(width, height, GL_RGB, GL_FLOAT, data);		
 		glfwSwapBuffers(window);
 		glfwPollEvents();
 		printMsPerFrame(&LastTime, &nbFrames);

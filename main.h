@@ -28,6 +28,8 @@ void moveAround(GLFWwindow* window, long double* xmin, long double* xmax, long d
 int width = 1000;
 int height = 600;
 
+const char * vertexFilename = "./Shaders/vertex.glsl";
+const char * fragmentFilename = "./Shaders/fragment.glsl";
 
 #endif
  
