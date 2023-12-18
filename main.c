@@ -201,7 +201,7 @@ int main(int argc, char** argv) {
 
 	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 
-	glfwSwapInterval(1);
+	glfwSwapInterval(0);
 
 
 	long double complex c;
