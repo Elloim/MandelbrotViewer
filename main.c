@@ -417,6 +417,7 @@ int main(int argc, char** argv) {
 		cell_pixel_width = width / cell_number_col;
 		cell_pixel_height = height / cell_number_row;
 
+		
 		for (int i = 0; i < num_threads; i++) {
 			
 			arguments[i].gradient = gradient;
@@ -436,21 +437,25 @@ int main(int argc, char** argv) {
 				return -1;
 			}
 		}
+		
 
 		glUseProgram(shaderProgram);
 		glBindVertexArray(vao);
 		glUniform1d(uniXmin, (double) xmin);
-		glUniform1d(uniXmax, (double ) xmax / 2);
+		glUniform1d(uniXmax, (double ) xmax - xmax / 2);
 		glUniform1d(uniYmin, (double ) ymin);
 		glUniform1d(uniYmax, (double) ymax);
 		glUniform1d(uniScalex, (double) xscale);
 		glUniform1d(uniScaley, (double) yscale);
 		glDrawArrays(GL_TRIANGLES, 0, 6);
 
+
 		for (int i = 0; i < num_threads; i++) {
 			pthread_join(threads[i], NULL);
 		}
 		global_count = 0;
+
+		
 
 		glUseProgram(0);
 		glDrawPixels(width, height, GL_RGB, GL_FLOAT, data);		
