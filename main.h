@@ -39,7 +39,7 @@ void moveAround(GLFWwindow* window, long double* xmin, long double* xmax, long d
 
 void * createThread(void * args);
 
-void thread(float ** gradient, float * data, long double xscale, long double yscale, long double xmin, long double ymin, int interp_size, int size_grad, int max_n, int start, int line_start, int cell_index);
+void thread(float ** gradient, float * data, long double xscale, long double yscale, long double xmin, long double ymin, int interp_size, int size_grad, int max_n, int cell_index);
 
 int globalCountValueInc();
 
@@ -50,6 +50,7 @@ int globalCountValue();
 // Definition variables globales
 int width = 1440;
 int height = 832;
+
 
 int global_count = 0;
 int cell_number = 0;

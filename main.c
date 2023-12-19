@@ -18,7 +18,6 @@
 
 #include "main.h"
 
-
 void error_callback(int error, const char* description) {
 	fprintf(stderr, "Erreur num %d : %s\n", error, description);
 }
@@ -109,19 +108,19 @@ void moveAround(GLFWwindow* window, long double* xmin, long double* xmax, long d
 
 void * createThread(void * args) {
 	args_t * vals = args;
-	thread(vals -> gradient, vals -> data, vals -> xscale, vals -> yscale, vals -> xmin, vals -> ymin, vals -> interp_size, vals -> size_grad, vals -> max_n, vals -> start, vals -> line_start, vals -> cell_index);
+	thread(vals -> gradient, vals -> data, vals -> xscale, vals -> yscale, vals -> xmin, vals -> ymin, vals -> interp_size, vals -> size_grad, vals -> max_n, vals -> cell_index);
 	pthread_exit(NULL);
 }
 
-void thread(float ** gradient, float * data, long double xscale, long double yscale, long double xmin, long double ymin, int interp_size, int size_grad, int max_n, int start, int line_start, int cell_index) {
+void thread(float ** gradient, float * data, long double xscale, long double yscale, long double xmin, long double ymin, int interp_size, int size_grad, int max_n, int cell_index) {
 	
-	int count = start;
+	int count;
 	int iter = 0;
 	float frac;
 	float nu;
 	long double c_r;
 	long double c_i;
-	//int line_start;
+	int line_start;
 	int line_end;
 	int col_start;
 	int col_end;
@@ -135,8 +134,6 @@ void thread(float ** gradient, float * data, long double xscale, long double ysc
 		line_end = line_start + cell_pixel_height;
 		col_start = cell_pixel_width * (cell_index % cell_number_col);
 		col_end = col_start + cell_pixel_width;
-		count = line_start * cell_pixel_width * 3 + col_start*3;
-		//printf("line_start %d, line_end %d col_start %d col_end %d count %d cell_index %d\n", line_start, line_end, col_start, col_end, count, cell_index);
 		for (int i = line_start; i < line_end; i++) {
 			for (int j = col_start; j < col_end; j++) {
 				count = i * width * 3 + j*3;
@@ -264,7 +261,7 @@ int main(int argc, char** argv) {
 	long double ymax = (height/(long double)width) * (xmax - xmin)/2;
 	long double ymin = - ymax;
 
-	int max_n = 500;
+	int max_n = 300;
 
 	long double xscale = (xmax - xmin) / width;
 	long double yscale = (ymax - ymin) / height;
@@ -342,8 +339,6 @@ int main(int argc, char** argv) {
 			arguments[i].interp_size = interp_size;
 			arguments[i].size_grad = size_grad;
 			arguments[i].max_n = max_n;
-			arguments[i].start = (width * height) / num_threads * i * 3;
-			arguments[i].line_start = i * (height / num_threads);
 
 			int rc = pthread_create(&threads[i], NULL, createThread, (void*)&arguments[i]);
 
