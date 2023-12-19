@@ -150,12 +150,18 @@ void thread(float ** gradient, float * data, long double * xscale, long double *
 				count = i * width * 3 + j*3;
 				c_r = *xmin + j * *xscale;
 				c_i = *ymin + i * *yscale;
-				iter = mandelbrotFunc(&c_r, &c_i, max_n);	
-				nu = logf(log2f(sqrtf((float)(c_r * c_r + c_i * c_i))));
-				frac = maxf(0.0, minf((iter + (1-nu))/ max_n, 1.));
-				index = (int) (frac * size_grad) % size_grad;
-
-				memcpy(&data[count], gradient[index], sizeof(float) * 3);
+				iter = mandelbrotFunc(&c_r, &c_i, max_n);
+				if (iter != max_n) {
+					nu = logf(log2f(sqrtf((float)(c_r * c_r + c_i * c_i))));
+					frac = maxf(0.0, minf((iter + (1-nu))/ max_n, 1.));
+					index = (int) (frac * size_grad) % size_grad;
+					memcpy(&data[count], gradient[index], sizeof(float) * 3);
+				}
+				else {
+					data[count] = 0;
+					data[count+1] = 0;
+					data[count+2] = 0;
+				}
 
 				count += 3;
 			}
