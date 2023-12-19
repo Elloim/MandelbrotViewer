@@ -24,14 +24,15 @@ make
 ```
 # Showcase
 
-![mangif](./rcs/mandelbrot2.gif)
-
 ![mandelbrot4](./rcs/mandelbrot4.jpg)
 
-![Mandelbrotgif](./rcs/Mandelbrot.gif)
+![mandelbrot5](./rcs/mandelbrot5.jpg)
 
-![Mandelbrot](./rcs/mandelbrot.jpg)
+![mandelbrot11](./rcs/mandelbrot11.jpg)
 
-![Mandelbrot2](./rcs/mandelbrot2.jpg)
+![mandelbrot10](./rcs/mandelbrot6.jpg)
 
-![Mandelbrot3](./rcs/mandelbrot3.jpg)
+![mandelbrot9](./rcs/mandelbrot9.jpg)
+
+![mangif](./rcs/mandelbrot2.gif)
+
