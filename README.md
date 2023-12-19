@@ -24,6 +24,10 @@ make
 ```
 # Showcase
 
+![mangif](./rcs/mandelbrot2.gif)
+
+![mandelbrot4](./rcs/mandelbrot4.jpg)
+
 ![Mandelbrotgif](./rcs/Mandelbrot.gif)
 
 ![Mandelbrot](./rcs/mandelbrot.jpg)
