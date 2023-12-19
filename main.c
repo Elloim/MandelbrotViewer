@@ -18,6 +18,20 @@
 
 #include "main.h"
 
+float maxf(float a, float b) {
+	if (a > b) {
+		return a;
+	}
+	return b;
+}
+
+float minf(float a, float b) {
+	if (a < b) {
+		return a;
+	}
+	return b;
+}
+
 void error_callback(int error, const char* description) {
 	fprintf(stderr, "Erreur num %d : %s\n", error, description);
 }
@@ -112,7 +126,7 @@ void * createThread(void * args) {
 	pthread_exit(NULL);
 }
 
-void thread(float ** gradient, float * data, long double xscale, long double yscale, long double xmin, long double ymin, int interp_size, int size_grad, int max_n, int cell_index) {
+void thread(float ** gradient, float * data, long double * xscale, long double * yscale, long double * xmin, long double * ymin, int interp_size, int size_grad, int max_n, int cell_index) {
 	
 	int count;
 	int iter = 0;
@@ -124,12 +138,9 @@ void thread(float ** gradient, float * data, long double xscale, long double ysc
 	int line_end;
 	int col_start;
 	int col_end;
+	int index;
 
-	while (globalCountValue() < cell_number) {
-		cell_index = globalCountValueInc();
-		if (cell_index >= cell_number) {
-			break;
-		}
+	while ((cell_index = globalCountValueInc()) < cell_number) {
 		line_start = cell_pixel_height * (cell_index / cell_number_col);
 		line_end = line_start + cell_pixel_height;
 		col_start = cell_pixel_width * (cell_index % cell_number_col);
@@ -137,18 +148,14 @@ void thread(float ** gradient, float * data, long double xscale, long double ysc
 		for (int i = line_start; i < line_end; i++) {
 			for (int j = col_start; j < col_end; j++) {
 				count = i * width * 3 + j*3;
-				c_r = xmin + j * xscale;
-				c_i = ymin + i * yscale;
-				iter = mandelbrotFunc(&c_r, &c_i, max_n) * interp_size;	
-				nu = log2f(log2f(sqrtf((float)(c_r * c_r + c_i * c_i))));
-				frac = (1-nu)*interp_size;
-				if (isnanf(frac)) {
-					frac = 0.;
-				}
+				c_r = *xmin + j * *xscale;
+				c_i = *ymin + i * *yscale;
+				iter = mandelbrotFunc(&c_r, &c_i, max_n);	
+				nu = logf(log2f(sqrtf((float)(c_r * c_r + c_i * c_i))));
+				frac = maxf(0.0, minf((iter + (1-nu))/ max_n, 1.));
+				index = (int) (frac * size_grad) % size_grad;
 
-				data[count] = gradient[(iter + (int)frac) % size_grad][0];
-				data[count+1] = gradient[(iter + (int)frac) % size_grad][1];
-				data[count+2] = gradient[(iter + (int)frac) % size_grad][2];
+				memcpy(&data[count], gradient[index], sizeof(float) * 3);
 
 				count += 3;
 			}
@@ -261,29 +268,11 @@ int main(int argc, char** argv) {
 	long double ymax = (height/(long double)width) * (xmax - xmin)/2;
 	long double ymin = - ymax;
 
-	int max_n = 300;
+	int max_n = 500;
 
 	long double xscale = (xmax - xmin) / width;
 	long double yscale = (ymax - ymin) / height;
 
-	int gradient_points[][3] = {
-		{66, 30, 1},
-		{25, 7, 26},
-		{9,   120,  47},
-		{4,   230,  73},
-		{  0,   100, 100},
-		{ 12,  44, 138},
-		{ 24,  82, 177},
-		{57, 125, 209},
-		{134, 181, 229},
-		{211, 236, 248},
-		{241, 233, 191},
-		{248, 201,  95},
-		{255, 20,   0},
-		{204, 10,   0},
-		{34,  7,   230},
-		{50,  52,  120}
-	};
 	float ** gradient;
 	int nb_cols = 16;
 	int interp_size = 256;
@@ -292,9 +281,6 @@ int main(int argc, char** argv) {
 
 	double LastTime = glfwGetTime();
 	int nbFrames = 0;
-	double nu;
-	int iter = 0;
-	float frac = 0;
 	double mouseX = 0;
 	double mouseY = 0;
 	double prevmouseX = 0;
@@ -304,6 +290,18 @@ int main(int argc, char** argv) {
 	int num_threads = 16;
 	pthread_t threads[num_threads];
 	args_t arguments[num_threads];
+
+	for (int i = 0; i < num_threads; i++) {
+		arguments[i].gradient = gradient;
+		arguments[i].data = data;
+		arguments[i].interp_size = interp_size;	
+		arguments[i].size_grad = size_grad;
+		arguments[i].max_n = max_n;
+		arguments[i].xscale = &xscale;
+		arguments[i].yscale = &yscale;
+		arguments[i].xmin = &xmin;
+		arguments[i].ymin = &ymin;
+	}
 
 	cell_number = 32*32;
 	cell_number_row = 32;
@@ -328,17 +326,7 @@ int main(int argc, char** argv) {
 		cell_pixel_width = width / cell_number_col;
 		cell_pixel_height = height / cell_number_row;
 
-		for (int i = 0; i < num_threads; i++) {
-			
-			arguments[i].gradient = gradient;
-			arguments[i].data = data;
-			arguments[i].xscale = xscale;
-			arguments[i].yscale = yscale;
-			arguments[i].xmin = xmin;
-			arguments[i].ymin = ymin;
-			arguments[i].interp_size = interp_size;
-			arguments[i].size_grad = size_grad;
-			arguments[i].max_n = max_n;
+		for (int i = 0; i < num_threads; i++) {	
 
 			int rc = pthread_create(&threads[i], NULL, createThread, (void*)&arguments[i]);
 

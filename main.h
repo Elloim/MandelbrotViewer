@@ -13,10 +13,10 @@
 typedef struct args_t {
 	float ** gradient;
 	float * data;
-	long double xscale;
-	long double yscale;
-	long double xmin;
-	long double ymin;
+	long double * xscale;
+	long double * yscale;
+	long double * xmin;
+	long double * ymin;
 	int interp_size;
 	int size_grad;
 	int max_n;
@@ -26,6 +26,10 @@ typedef struct args_t {
 } args_t;
 
 // Definition fonctions
+
+float maxf(float a, float b);
+
+float minf(float a, float b);
 
 void error_callback(int error, const char* description);
 
@@ -39,7 +43,7 @@ void moveAround(GLFWwindow* window, long double* xmin, long double* xmax, long d
 
 void * createThread(void * args);
 
-void thread(float ** gradient, float * data, long double xscale, long double yscale, long double xmin, long double ymin, int interp_size, int size_grad, int max_n, int cell_index);
+void thread(float ** gradient, float * data, long double * xscale, long double * yscale, long double * xmin, long double * ymin, int interp_size, int size_grad, int max_n, int cell_index);
 
 int globalCountValueInc();
 
@@ -51,6 +55,24 @@ int globalCountValue();
 int width = 1440;
 int height = 832;
 
+int gradient_points[][3] = {
+		{66,  30,    1},
+		{25,  7,    26},
+		{9,   120,  47},
+		{4,   230,  73},
+		{0,   100, 100},
+		{12,  44,  138},
+		{24,  82,  177},
+		{57,  125, 209},
+		{134, 181, 229},
+		{211, 236, 248},
+		{241, 233, 191},
+		{248, 201,  95},
+		{255, 20,    0},
+		{204, 10,    0},
+		{34,  7,   230},
+		{50,  52,  120}
+	};
 
 int global_count = 0;
 int cell_number = 0;
