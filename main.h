@@ -2,7 +2,7 @@
  * name : main.h
  * auteur : PETIT Eloi
  * date : 2023 nov. 21
-*/
+ */
 
 
 #ifndef main_h
@@ -22,6 +22,7 @@ typedef struct args_t {
 	int max_n;
 	int start;
 	int line_start;
+	int cell_index;
 } args_t;
 
 // Definition fonctions
@@ -38,13 +39,26 @@ void moveAround(GLFWwindow* window, long double* xmin, long double* xmax, long d
 
 void * createThread(void * args);
 
-void thread(float ** gradient, float * data, long double xscale, long double yscale, long double xmin, long double ymin, int interp_size, int size_grad, int max_n, int start, int line_start);
+void thread(float ** gradient, float * data, long double xscale, long double yscale, long double xmin, long double ymin, int interp_size, int size_grad, int max_n, int start, int line_start, int cell_index);
+
+int globalCountValueInc();
+
+void globalCountInc();
+
+int globalCountValue();
 
 // Definition variables globales
 int width = 1440;
-int height = 816;
+int height = 832;
 
+int global_count = 0;
+int cell_number = 0;
+int cell_number_row = 0;
+int cell_number_col = 0;
+int cell_pixel_width = 0;
+int cell_pixel_height = 0;
+pthread_mutex_t global_count_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 #endif
 
- 
+

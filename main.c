@@ -109,11 +109,11 @@ void moveAround(GLFWwindow* window, long double* xmin, long double* xmax, long d
 
 void * createThread(void * args) {
 	args_t * vals = args;
-	thread(vals -> gradient, vals -> data, vals -> xscale, vals -> yscale, vals -> xmin, vals -> ymin, vals -> interp_size, vals -> size_grad, vals -> max_n, vals -> start, vals -> line_start);
+	thread(vals -> gradient, vals -> data, vals -> xscale, vals -> yscale, vals -> xmin, vals -> ymin, vals -> interp_size, vals -> size_grad, vals -> max_n, vals -> start, vals -> line_start, vals -> cell_index);
 	pthread_exit(NULL);
 }
 
-void thread(float ** gradient, float * data, long double xscale, long double yscale, long double xmin, long double ymin, int interp_size, int size_grad, int max_n, int start, int line_start) {
+void thread(float ** gradient, float * data, long double xscale, long double yscale, long double xmin, long double ymin, int interp_size, int size_grad, int max_n, int start, int line_start, int cell_index) {
 	
 	int count = start;
 	int iter = 0;
@@ -121,25 +121,84 @@ void thread(float ** gradient, float * data, long double xscale, long double ysc
 	float nu;
 	long double c_r;
 	long double c_i;
-	
-	for (int i = line_start; i < line_start + (height/16); i++) {
-		for (int j = 0; j < width; j++) {
-			c_r = xmin + j * xscale;
-			c_i = ymin + i * yscale;
-			iter = mandelbrotFunc(&c_r, &c_i, max_n) * interp_size;	
-			nu = log2f(log2f(sqrtf((float)(c_r * c_r + c_i * c_i))));
-			frac = (1-nu)*interp_size;
-			if (isnanf(frac)) {
-				frac = 0.;
-			}
+	//int line_start;
+	int line_end;
+	int col_start;
+	int col_end;
 
-			data[count] = gradient[(iter + (int)frac) % size_grad][0];
-			data[count+1] = gradient[(iter + (int)frac) % size_grad][1];
-			data[count+2] = gradient[(iter + (int)frac) % size_grad][2];
-
-			count += 3;
+	while (globalCountValue() < cell_number) {
+		cell_index = globalCountValueInc();
+		if (cell_index >= cell_number) {
+			break;
 		}
+		line_start = cell_pixel_height * (cell_index / cell_number_col);
+		line_end = line_start + cell_pixel_height;
+		col_start = cell_pixel_width * (cell_index % cell_number_col);
+		col_end = col_start + cell_pixel_width;
+		count = line_start * cell_pixel_width * 3 + col_start*3;
+		//printf("line_start %d, line_end %d col_start %d col_end %d count %d cell_index %d\n", line_start, line_end, col_start, col_end, count, cell_index);
+		for (int i = line_start; i < line_end; i++) {
+			for (int j = col_start; j < col_end; j++) {
+				count = i * width * 3 + j*3;
+				c_r = xmin + j * xscale;
+				c_i = ymin + i * yscale;
+				iter = mandelbrotFunc(&c_r, &c_i, max_n) * interp_size;	
+				nu = log2f(log2f(sqrtf((float)(c_r * c_r + c_i * c_i))));
+				frac = (1-nu)*interp_size;
+				if (isnanf(frac)) {
+					frac = 0.;
+				}
+
+				data[count] = gradient[(iter + (int)frac) % size_grad][0];
+				data[count+1] = gradient[(iter + (int)frac) % size_grad][1];
+				data[count+2] = gradient[(iter + (int)frac) % size_grad][2];
+
+				count += 3;
+			}
+		}
+	}	
+}
+
+int globalCountValueInc() {
+	
+	int res;
+
+	if (pthread_mutex_lock(&global_count_mutex)) {
+		fprintf(stderr, "Error locking global_count_mutex in globalCountValue\n");
 	}
+	res = global_count;
+	global_count++;
+	if (pthread_mutex_unlock(&global_count_mutex)) {
+		fprintf(stderr, "Error unlocking global_count_mutex in globalCountValue\n");
+	}
+
+	return res;
+}
+
+void globalCountInc() {
+
+	if (pthread_mutex_lock(&global_count_mutex)) {
+		fprintf(stderr, "Error locking global_count_mutex in globalCountInc\n");
+	}
+	global_count++;
+	if (pthread_mutex_unlock(&global_count_mutex)) {
+		fprintf(stderr, "Error unlocking global_count_mutex in globalCountInc\n");
+	}
+}
+
+int globalCountValue() {
+	
+	int res;
+
+	if (pthread_mutex_lock(&global_count_mutex)) {
+		fprintf(stderr, "Error locking global_count_mutex in globalCountValue\n");
+	}
+	res = global_count;
+	if (pthread_mutex_unlock(&global_count_mutex)) {
+		fprintf(stderr, "Error unlocking global_count_mutex in globalCountValue\n");
+	}
+
+	return res;
 }
 
 int main(int argc, char** argv) {
@@ -249,6 +308,12 @@ int main(int argc, char** argv) {
 	pthread_t threads[num_threads];
 	args_t arguments[num_threads];
 
+	cell_number = 32*32;
+	cell_number_row = 32;
+	cell_number_col = 32;
+
+	cell_pixel_width = width / cell_number_col;
+	cell_pixel_height = height / cell_number_row;
 
 	while (!glfwWindowShouldClose(window)) {
 
@@ -262,6 +327,9 @@ int main(int argc, char** argv) {
 
 		xscale = (xmax - xmin) / (width);
 		yscale = (ymax - ymin) / (height);
+
+		cell_pixel_width = width / cell_number_col;
+		cell_pixel_height = height / cell_number_row;
 
 		for (int i = 0; i < num_threads; i++) {
 			
@@ -288,6 +356,7 @@ int main(int argc, char** argv) {
 		for (int i = 0; i < num_threads; i++) {
 			pthread_join(threads[i], NULL);
 		}
+		global_count = 0;
 
 		glDrawPixels(width, height, GL_RGB, GL_FLOAT, data);		
 		glfwSwapBuffers(window);
