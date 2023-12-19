@@ -27,6 +27,8 @@ typedef struct args_t {
 
 // Definition fonctions
 
+char* loadShaderContent(const char* filename);
+
 void error_callback(int error, const char* description);
 
 void printMsPerFrame(double* LastTime, int* nbFrames);
@@ -51,6 +53,17 @@ int globalCountValue();
 int width = 1440;
 int height = 832;
 
+float verts[] = {
+	-1, -1, 0.,
+	0., -1, 0.,
+	-1., 1., 0.,
+	0., -1., 0.,
+	0, 1., 0.,
+	-1., 1., 0.
+};
+
+const char * vertexFilename = "./Shaders/vertex.glsl";
+const char * fragmentFilename = "./Shaders/fragment.glsl";
 
 int global_count = 0;
 int cell_number = 0;

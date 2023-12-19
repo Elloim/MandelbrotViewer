@@ -18,6 +18,35 @@
 
 #include "main.h"
 
+char* loadShaderContent(const char* filename) {
+	FILE * file;
+	long size;
+	char* shaderContent;
+
+	file = fopen(filename, "rb");
+	if (file == NULL) {
+		fprintf(stderr, "Error loading shader from file %s\n", filename);
+		return "";
+	}
+	
+	fseek(file, 0L, SEEK_END);
+	size  = ftell(file) + 1;
+	printf("Size : %lo\n", size);
+	fclose(file);
+
+	file = fopen(filename, "r");
+
+	shaderContent = memset(malloc(size), '\0', size);
+	if (!fread(shaderContent, 1, size-1, file)) {
+		fprintf(stderr, "Error loading shader from file %s : fread failed\n", filename);
+	}
+	fclose(file);
+
+	printf("%s\n", shaderContent);
+	
+	return shaderContent;
+}
+
 void error_callback(int error, const char* description) {
 	fprintf(stderr, "Erreur num %d : %s\n", error, description);
 }
@@ -299,7 +328,7 @@ int main(int argc, char** argv) {
 	double mouseY = 0;
 	double prevmouseX = 0;
 	double prevmouseY = 0;
-	glRasterPos2i(-1, -1);
+	glRasterPos2i(0, -1);
 	
 	int num_threads = 16;
 	pthread_t threads[num_threads];
@@ -309,8 +338,67 @@ int main(int argc, char** argv) {
 	cell_number_row = 32;
 	cell_number_col = 32;
 
-	cell_pixel_width = width / cell_number_col;
+	cell_pixel_width = width / (cell_number_col*2);
 	cell_pixel_height = height / cell_number_row;
+
+	// OpenGL shaders
+	GLuint vbo, vao;
+	GLint shader_status;
+
+	glGenVertexArrays(1, &vao);
+	glBindVertexArray(vao);
+
+	glGenBuffers(1, &vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
+
+	// Loading shaders
+	const char * vertex_shader_text = (const char *) loadShaderContent(vertexFilename);
+	GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
+	glShaderSource(vertexShader, 1, &vertex_shader_text, NULL);
+	glCompileShader(vertexShader);
+
+	glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &shader_status);
+	if (shader_status == GL_FALSE) {
+		fprintf(stderr, "Erreur compilation shader vertex\n");
+		glfwDestroyWindow(window);
+		glfwTerminate();
+		return -1;
+	}
+
+	const char * fragment_shader_text = (const char *) loadShaderContent(fragmentFilename);
+	GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+	glShaderSource(fragmentShader, 1, &fragment_shader_text, NULL);
+	glCompileShader(fragmentShader);
+
+	glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &shader_status);
+	if (shader_status == GL_FALSE) {
+		fprintf(stderr, "Erreur compilation fragent shader\n");
+		glfwDestroyWindow(window);
+		glfwTerminate();
+		return -1;
+	}
+
+	glBindVertexArray(vao);
+	GLuint shaderProgram = glCreateProgram();
+	glAttachShader(shaderProgram, vertexShader);
+	glAttachShader(shaderProgram, fragmentShader);
+	glLinkProgram(shaderProgram);
+	glUseProgram(shaderProgram);
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+	GLuint posAttrib = glGetAttribLocation(shaderProgram, "position");
+	glEnableVertexAttribArray(posAttrib);
+	glVertexAttribPointer(posAttrib, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), 0);
+
+
+	GLuint uniXmin = glGetUniformLocation(shaderProgram, "xmin");
+	GLuint uniXmax = glGetUniformLocation(shaderProgram, "xmax");
+	GLuint uniYmin = glGetUniformLocation(shaderProgram, "ymin");
+	GLuint uniYmax = glGetUniformLocation(shaderProgram, "ymax");
+
+	GLuint uniScalex = glGetUniformLocation(shaderProgram, "scalex");
+	GLuint uniScaley = glGetUniformLocation(shaderProgram, "scaley");
 
 	while (!glfwWindowShouldClose(window)) {
 
@@ -319,6 +407,7 @@ int main(int argc, char** argv) {
 		glfwGetFramebufferSize(window, &width, &height);
 		glfwGetCursorPos(window, &mouseX, &mouseY);
 		glClear(GL_COLOR_BUFFER_BIT);
+		glViewport(0, 0, width, height);
 
 		moveAround(window, &xmin, &xmax, &ymin, &ymax, xscale, yscale, prevmouseX, prevmouseY, mouseX, mouseY);
 
@@ -334,7 +423,7 @@ int main(int argc, char** argv) {
 			arguments[i].data = data;
 			arguments[i].xscale = xscale;
 			arguments[i].yscale = yscale;
-			arguments[i].xmin = xmin;
+			arguments[i].xmin = xmin + (xmax-xmin) / 2;
 			arguments[i].ymin = ymin;
 			arguments[i].interp_size = interp_size;
 			arguments[i].size_grad = size_grad;
@@ -348,11 +437,22 @@ int main(int argc, char** argv) {
 			}
 		}
 
+		glUseProgram(shaderProgram);
+		glBindVertexArray(vao);
+		glUniform1d(uniXmin, (double) xmin);
+		glUniform1d(uniXmax, (double ) xmax / 2);
+		glUniform1d(uniYmin, (double ) ymin);
+		glUniform1d(uniYmax, (double) ymax);
+		glUniform1d(uniScalex, (double) xscale);
+		glUniform1d(uniScaley, (double) yscale);
+		glDrawArrays(GL_TRIANGLES, 0, 6);
+
 		for (int i = 0; i < num_threads; i++) {
 			pthread_join(threads[i], NULL);
 		}
 		global_count = 0;
 
+		glUseProgram(0);
 		glDrawPixels(width, height, GL_RGB, GL_FLOAT, data);		
 		glfwSwapBuffers(window);
 		glfwPollEvents();

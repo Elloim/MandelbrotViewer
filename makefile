@@ -6,7 +6,7 @@ OBJECTS=main.o
 prog:main.o
 	$(CC) $(OBJECTS) -o main $(OPENGL) -lm
 
-main.o:main.c main.h
+main.o:main.c main.h makefile
 	$(CC) $(COPTIONS) main.c -c
 
 clean:
