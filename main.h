@@ -52,8 +52,8 @@ void globalCountInc();
 int globalCountValue();
 
 // Definition variables globales
-int width = 1440;
-int height = 832;
+int width = 2000;
+int height = 1400;
 
 /*int gradient_points[][3] = {
 		{66,  30,    1},

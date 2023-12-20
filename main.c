@@ -166,7 +166,7 @@ void thread(float ** gradient, float * data, long double * xscale, long double *
 				count += 3;
 			}
 		}
-	}	
+	}
 }
 
 int globalCountValueInc() {
@@ -263,7 +263,7 @@ int main(int argc, char** argv) {
 		return -1;
 	}
 
-	glEnable(GL_FRAMEBUFFER_SRGB);
+	//glEnable(GL_FRAMEBUFFER_SRGB);
 
 	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 
@@ -309,9 +309,9 @@ int main(int argc, char** argv) {
 		arguments[i].ymin = &ymin;
 	}
 
-	cell_number = 32*32;
-	cell_number_row = 32;
-	cell_number_col = 32;
+	cell_number = 40*40;
+	cell_number_row = 40;
+	cell_number_col = 40;
 
 	cell_pixel_width = width / cell_number_col;
 	cell_pixel_height = height / cell_number_row;
