@@ -33,7 +33,7 @@ float minf(float a, float b) {
 }
 
 void error_callback(int error, const char* description) {
-	fprintf(stderr, "Erreur num %d : %s\n", error, description);
+	fprintf(stderr, "Erreur glfw num %d : %s\n", error, description);
 }
 
 void printMsPerFrame(double* LastTime, int* nbFrames) {
@@ -117,8 +117,8 @@ void moveAround(GLFWwindow* window, float * data, long double* xmin, long double
 	}
 
 	if (glfwGetMouseButton(window, 2)) {
-		long double xlength = (*xmax - *xmin)/10;
-		long double ylength = (*ymax - *ymin)/10;
+		long double xlength = (*xmax - *xmin) / 10;
+		long double ylength = (*ymax - *ymin) / 10;
 		*xmin += xlength;
 		*xmax += -xlength;
 		*ymin += ylength;
@@ -132,11 +132,11 @@ void moveAround(GLFWwindow* window, float * data, long double* xmin, long double
 
 void * createThread(void * args) {
 	args_t * vals = args;
-	thread(vals -> gradient, vals -> data, vals -> xscale, vals -> yscale, vals -> xmin, vals -> ymin, vals -> interp_size, vals -> size_grad, vals -> max_n, vals -> cell_index);
+	thread(vals -> gradient, vals -> data, vals -> xscale, vals -> yscale, vals -> xmin, vals -> ymin, vals -> size_grad, vals -> max_n, vals -> cell_index);
 	pthread_exit(NULL);
 }
 
-void thread(float ** gradient, float * data, long double * xscale, long double * yscale, long double * xmin, long double * ymin, int interp_size, int size_grad, int max_n, int cell_index) {
+void thread(float ** gradient, float * data, long double * xscale, long double * yscale, long double * xmin, long double * ymin, int size_grad, int max_n, int cell_index) {
 	
 	int count;
 	int iter = 0;
@@ -151,16 +151,20 @@ void thread(float ** gradient, float * data, long double * xscale, long double *
 	int index;
 
 	while ((cell_index = globalGetCellIndex()) != -1) {
+
 		line_start = cell_pixel_height * (cell_index / cell_number_col);
 		line_end = line_start + cell_pixel_height;
 		col_start = cell_pixel_width * (cell_index % cell_number_col);
 		col_end = col_start + cell_pixel_width;
+
 		for (int i = line_start; i < line_end; i++) {
 			for (int j = col_start; j < col_end; j++) {
+
 				count = i * width * 3 + j*3;
 				c_r = *xmin + j * *xscale;
 				c_i = *ymin + i * *yscale;
 				iter = mandelbrotFunc(&c_r, &c_i, max_n);
+
 				if (iter != max_n) {
 					nu = logf(log2f(sqrtf((float)(c_r * c_r + c_i * c_i))));
 					frac = maxf(0.0, minf((iter + (1-nu))/ max_n, 1.));
@@ -168,9 +172,7 @@ void thread(float ** gradient, float * data, long double * xscale, long double *
 					memcpy(&data[count], gradient[index], sizeof(float) * 3);
 				}
 				else {
-					data[count] = 0;
-					data[count+1] = 0;
-					data[count+2] = 0;
+					memset(&data[count], 0, 3 * sizeof(float));
 				}
 
 				count += 3;
@@ -316,6 +318,7 @@ void updateCellsTab(int relX, int relY) {
 
 int main(int argc, char** argv) {
 
+	int max_n = 500;
 
 	for (int arg = 1; arg < argc; arg++) {
 		if (!strncmp("-w", argv[arg], 2)) {
@@ -324,29 +327,18 @@ int main(int argc, char** argv) {
 		else if (!strncmp("-h", argv[arg], 2)) {
 			height = (int) strtol(argv[arg+1], NULL, 10);
 		}
+		else if (!strncmp("-max", argv[arg], 4)) {
+			max_n = (int) strtol(argv[arg+1], NULL, 10);
+		}
 	}
 
 
 	GLFWwindow* window;
 
-	float * data = (float*) malloc(sizeof(float) * width * height * 3);
-
-	int count = 0;
-	for (int i = 0; i < height; i++) {
-		for (int j = 0; j < width; j++) {
-			data[count] = 1.;
-			data[count+1] = 0.;
-			data[count+2] = 0.;
-			count += 3;
-		}
-	}
-
 	if (!glfwInit()) {
 		printf("Erreur initialisation\n");
 		return -1;
 	}
-
-
 
 	window = glfwCreateWindow(width, height, "Mandelbrot", NULL, NULL);
 
@@ -369,15 +361,27 @@ int main(int argc, char** argv) {
 	//glEnable(GL_FRAMEBUFFER_SRGB);
 
 	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+	glfwSetErrorCallback(error_callback);
 
 	glfwSwapInterval(0);
+	
 
-	long double xmin = -1.9;
-	long double xmax = -1.888;
+	float * data = (float*) malloc(sizeof(float) * width * height * 3);
+
+	int count = 0;
+	for (int i = 0; i < height; i++) {
+		for (int j = 0; j < width; j++) {
+			data[count] = 1.;
+			data[count+1] = 0.;
+			data[count+2] = 0.;
+			count += 3;
+		}
+	}
+
+	long double xmin = -2;
+	long double xmax = 1;
 	long double ymax = (height/(long double)width) * (xmax - xmin)/2;
 	long double ymin = - ymax;
-
-	int max_n = 500;
 
 	long double xscale = (xmax - xmin) / width;
 	long double yscale = (ymax - ymin) / height;
@@ -403,7 +407,6 @@ int main(int argc, char** argv) {
 	for (int i = 0; i < num_threads; i++) {
 		arguments[i].gradient = gradient;
 		arguments[i].data = data;
-		arguments[i].interp_size = interp_size;	
 		arguments[i].size_grad = size_grad;
 		arguments[i].max_n = max_n;
 		arguments[i].xscale = &xscale;
@@ -411,10 +414,10 @@ int main(int argc, char** argv) {
 		arguments[i].xmin = &xmin;
 		arguments[i].ymin = &ymin;
 	}
-
-	cell_number = 100*100;
+	
 	cell_number_row = 100;
 	cell_number_col = 100;
+	cell_number = cell_number_row * cell_number_col;
 
 	cells_to_update = (int *) malloc(cell_number * sizeof(int));
 

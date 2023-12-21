@@ -17,7 +17,6 @@ typedef struct args_t {
 	long double * yscale;
 	long double * xmin;
 	long double * ymin;
-	int interp_size;
 	int size_grad;
 	int max_n;
 	int start;
@@ -43,7 +42,7 @@ void moveAround(GLFWwindow* window, float * data, long double* xmin, long double
 
 void * createThread(void * args);
 
-void thread(float ** gradient, float * data, long double * xscale, long double * yscale, long double * xmin, long double * ymin, int interp_size, int size_grad, int max_n, int cell_index);
+void thread(float ** gradient, float * data, long double * xscale, long double * yscale, long double * xmin, long double * ymin, int size_grad, int max_n, int cell_index);
 
 int globalGetCellIndex();
 
@@ -58,8 +57,8 @@ void updateCellsTab(int relX, int relY);
 void movePixelData(float * data, int relX, int relY);
 
 // Definition variables globales
-int width = 2000;
-int height = 1400;
+int width = 2100;
+int height = 1500;
 
 /*int gradient_points[][3] = {
 		{66,  30,    1},
