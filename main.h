@@ -39,17 +39,23 @@ int mandelbrotFunc(long double * c_r, long double * c_i, int max_n);
 
 void gradientInterpol(int points[][3], float*** gradient, int nb_points, int nb_gradients);
 
-void moveAround(GLFWwindow* window, long double* xmin, long double* xmax, long double* ymin, long double *ymax, long double xscale, long double yscale, double prevmouseX, double prevmouseY, double mouseX, double mouseY);
+void moveAround(GLFWwindow* window, float * data, long double* xmin, long double* xmax, long double* ymin, long double *ymax, long double xscale, long double yscale, double prevmouseX, double prevmouseY, double mouseX, double mouseY);
 
 void * createThread(void * args);
 
 void thread(float ** gradient, float * data, long double * xscale, long double * yscale, long double * xmin, long double * ymin, int interp_size, int size_grad, int max_n, int cell_index);
+
+int globalGetCellIndex();
 
 int globalCountValueInc();
 
 void globalCountInc();
 
 int globalCountValue();
+
+void updateCellsTab(int relX, int relY);
+
+void movePixelData(float * data, int relX, int relY);
 
 // Definition variables globales
 int width = 2000;
@@ -92,6 +98,9 @@ int gradient_points[][3] = {
 		{2,  110,   16},
 		{160,  111,  235}
 };
+
+int * cells_to_update;
+int nb_cells_to_update = 0;
 
 int global_count = 0;
 int cell_number = 0;

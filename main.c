@@ -90,7 +90,7 @@ void gradientInterpol(int points[][3], float*** gradient, int nb_points, int nb_
 	}
 }
 
-void moveAround(GLFWwindow* window, long double* xmin, long double* xmax, long double* ymin, long double *ymax, long double xscale, long double yscale, double prevmouseX, double prevmouseY, double mouseX, double mouseY) {
+void moveAround(GLFWwindow* window, float * data, long double* xmin, long double* xmax, long double* ymin, long double *ymax, long double xscale, long double yscale, double prevmouseX, double prevmouseY, double mouseX, double mouseY) {
 
 	if (glfwGetMouseButton(window, 0)) {
 		long double offsetX = (prevmouseX - mouseX) * xscale;
@@ -99,6 +99,8 @@ void moveAround(GLFWwindow* window, long double* xmin, long double* xmax, long d
 		*xmax += offsetX;
 		*ymin += offsetY;
 		*ymax += offsetY;
+		updateCellsTab((int)prevmouseX - mouseX, (int)-(prevmouseY - mouseY));	
+		movePixelData(data, prevmouseX - mouseX, mouseY - prevmouseY);
 	}
 
 	if (glfwGetMouseButton(window, 1)) {
@@ -108,6 +110,10 @@ void moveAround(GLFWwindow* window, long double* xmin, long double* xmax, long d
 		*xmax += xlength;
 		*ymin += -ylength;
 		*ymax += ylength;
+		for (int i = 0; i < cell_number; i++) {
+			cells_to_update[i] = i;
+		}
+		nb_cells_to_update = cell_number;
 	}
 
 	if (glfwGetMouseButton(window, 2)) {
@@ -117,6 +123,10 @@ void moveAround(GLFWwindow* window, long double* xmin, long double* xmax, long d
 		*xmax += -xlength;
 		*ymin += ylength;
 		*ymax += -ylength;
+		for (int i = 0; i < cell_number; i++) {
+			cells_to_update[i] = i;
+		}
+		nb_cells_to_update = cell_number;
 	}
 }
 
@@ -140,7 +150,7 @@ void thread(float ** gradient, float * data, long double * xscale, long double *
 	int col_end;
 	int index;
 
-	while ((cell_index = globalCountValueInc()) < cell_number) {
+	while ((cell_index = globalGetCellIndex()) != -1) {
 		line_start = cell_pixel_height * (cell_index / cell_number_col);
 		line_end = line_start + cell_pixel_height;
 		col_start = cell_pixel_width * (cell_index % cell_number_col);
@@ -169,17 +179,34 @@ void thread(float ** gradient, float * data, long double * xscale, long double *
 	}
 }
 
+int globalGetCellIndex() {
+	int res = -1;
+	
+	if (pthread_mutex_lock(&global_count_mutex)) {
+		fprintf(stderr, "Error locking global_count_mutex in globalGetCellIndex\n");
+	}
+	if (global_count < nb_cells_to_update) {
+		res = cells_to_update[global_count];
+	}
+	global_count++;
+	if (pthread_mutex_unlock(&global_count_mutex)) {
+		fprintf(stderr, "Error unlocking global_count_mutex in globalGetCellIndex\n");
+	}
+
+	return res;
+}
+
 int globalCountValueInc() {
 	
 	int res;
 
 	if (pthread_mutex_lock(&global_count_mutex)) {
-		fprintf(stderr, "Error locking global_count_mutex in globalCountValue\n");
+		fprintf(stderr, "Error locking global_count_mutex in globalCountValueInc\n");
 	}
 	res = global_count;
 	global_count++;
 	if (pthread_mutex_unlock(&global_count_mutex)) {
-		fprintf(stderr, "Error unlocking global_count_mutex in globalCountValue\n");
+		fprintf(stderr, "Error unlocking global_count_mutex in globalCountValueInc\n");
 	}
 
 	return res;
@@ -209,6 +236,82 @@ int globalCountValue() {
 	}
 
 	return res;
+}
+
+void movePixelData(float * data, int relX, int relY) {
+	int startX = 0;
+	int	startY = 0;
+	int	lengthX = 0;
+	int	lengthY = 0;
+	int destX = 0;
+	int destY = 0;
+	
+	if (relX < 0) {
+		startX = 0;
+		lengthX = width + relX;
+		destX = -relX;
+	}
+	else {
+		startX = relX;
+		lengthX = width - relX;
+		destX = 0;
+	}
+
+	if (relY > 0) {
+		startY = relY;
+		lengthY = height - relY;
+		destY = 0;
+	}
+	else {
+		startY = 0;
+		lengthY = height + relY;
+		destY = -relY;
+	}
+	
+	if (relY < 0) {
+		for (int i = lengthY - 1; i >= 0; i--) {
+			memcpy(&data[((destY + i) * width + destX) * 3], &data[((startY + i) * width + startX) * 3], lengthX * sizeof(float) * 3);
+		}
+	}
+	else {
+		for (int i = 0; i < lengthY; i++) {
+			memcpy(&data[((destY + i) * width + destX) * 3], &data[((startY + i) * width + startX) * 3], lengthX * sizeof(float) * 3);
+		}
+	}	
+}
+
+void updateCellsTab(int relX, int relY) {
+	int startX, startY, endX, endY;
+	if (relX > 0) {
+		startX = floorf(cell_number_col - (float)relX / cell_pixel_width);
+		endX = cell_number_col;
+	}
+	else {
+		startX = 0;
+		endX = ceilf(-(float)relX / cell_pixel_width);
+	}
+	if (relY > 0) {
+		startY = floorf(cell_number_row - (float)relY / cell_pixel_height);
+		endY = cell_number_row;
+	}
+	else {
+		startY = 0;
+		endY = ceilf(-(float)relY / cell_pixel_height);
+	}
+
+	nb_cells_to_update = 0;
+	for (int x = startX; x < endX; x++) {
+		for (int y = 0; y < cell_number_row; y++) {
+			cells_to_update[nb_cells_to_update] = x + y * cell_number_col;
+			nb_cells_to_update++;
+		}
+	}
+	for (int y = startY; y < endY; y++) {
+		for (int x = 0; x < cell_number_col; x++) {
+			cells_to_update[nb_cells_to_update] = x + y * cell_number_col;
+			nb_cells_to_update++;
+		}
+	}
 }
 
 int main(int argc, char** argv) {
@@ -309,9 +412,16 @@ int main(int argc, char** argv) {
 		arguments[i].ymin = &ymin;
 	}
 
-	cell_number = 40*40;
-	cell_number_row = 40;
-	cell_number_col = 40;
+	cell_number = 100*100;
+	cell_number_row = 100;
+	cell_number_col = 100;
+
+	cells_to_update = (int *) malloc(cell_number * sizeof(int));
+
+	for (int i = 0; i < cell_number; i++) {
+		cells_to_update[i] = i;
+	}
+	nb_cells_to_update = cell_number;
 
 	cell_pixel_width = width / cell_number_col;
 	cell_pixel_height = height / cell_number_row;
@@ -324,7 +434,7 @@ int main(int argc, char** argv) {
 		glfwGetCursorPos(window, &mouseX, &mouseY);
 		glClear(GL_COLOR_BUFFER_BIT);
 
-		moveAround(window, &xmin, &xmax, &ymin, &ymax, xscale, yscale, prevmouseX, prevmouseY, mouseX, mouseY);
+		moveAround(window, data, &xmin, &xmax, &ymin, &ymax, xscale, yscale, prevmouseX, prevmouseY, mouseX, mouseY);
 
 		xscale = (xmax - xmin) / (width);
 		yscale = (ymax - ymin) / (height);
