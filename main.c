@@ -136,19 +136,29 @@ void * createThread(void * args) {
 	pthread_exit(NULL);
 }
 
-void thread(float ** gradient, float * data, long double * xscale, long double * yscale, long double * xmin, long double * ymin, int size_grad, int max_n, int cell_index) {
+void coloring(float ** gradient, float * data, int iter, long double c_r, long double c_i, int size_grad, int max_n, int count) {
 	
+	if (iter != max_n) {
+		float nu = logf(log2f(sqrtf((float)(c_r * c_r + c_i * c_i))));
+		float frac = maxf(0.0, minf((iter + (1-nu))/ max_n, 1.));
+		int index = (int) (frac * size_grad) % size_grad;
+		memcpy(&data[count], gradient[index], sizeof(float) * 3);
+	}
+	else {
+		memset(&data[count], 0, 3 * sizeof(float));
+	}
+}
+
+void thread(float ** gradient, float * data, long double * xscale, long double * yscale, long double * xmin, long double * ymin, int size_grad, int max_n, int cell_index) {
+
 	int count;
-	int iter = 0;
-	float frac;
-	float nu;
+	int iter;
 	long double c_r;
 	long double c_i;
 	int line_start;
 	int line_end;
 	int col_start;
 	int col_end;
-	int index;
 
 	while ((cell_index = globalGetCellIndex()) != -1) {
 
@@ -160,22 +170,12 @@ void thread(float ** gradient, float * data, long double * xscale, long double *
 		for (int i = line_start; i < line_end; i++) {
 			for (int j = col_start; j < col_end; j++) {
 
-				count = i * width * 3 + j*3;
+				count = (i * width + j) * 3;
 				c_r = *xmin + j * *xscale;
 				c_i = *ymin + i * *yscale;
 				iter = mandelbrotFunc(&c_r, &c_i, max_n);
-
-				if (iter != max_n) {
-					nu = logf(log2f(sqrtf((float)(c_r * c_r + c_i * c_i))));
-					frac = maxf(0.0, minf((iter + (1-nu))/ max_n, 1.));
-					index = (int) (frac * size_grad) % size_grad;
-					memcpy(&data[count], gradient[index], sizeof(float) * 3);
-				}
-				else {
-					memset(&data[count], 0, 3 * sizeof(float));
-				}
-
-				count += 3;
+				coloring(gradient, data, iter, c_r, c_i, size_grad, max_n, count);
+			
 			}
 		}
 	}
@@ -183,7 +183,7 @@ void thread(float ** gradient, float * data, long double * xscale, long double *
 
 int globalGetCellIndex() {
 	int res = -1;
-	
+
 	if (pthread_mutex_lock(&global_count_mutex)) {
 		fprintf(stderr, "Error locking global_count_mutex in globalGetCellIndex\n");
 	}
@@ -199,7 +199,7 @@ int globalGetCellIndex() {
 }
 
 int globalCountValueInc() {
-	
+
 	int res;
 
 	if (pthread_mutex_lock(&global_count_mutex)) {
@@ -226,7 +226,7 @@ void globalCountInc() {
 }
 
 int globalCountValue() {
-	
+
 	int res;
 
 	if (pthread_mutex_lock(&global_count_mutex)) {
@@ -247,7 +247,7 @@ void movePixelData(float * data, int relX, int relY) {
 	int	lengthY = 0;
 	int destX = 0;
 	int destY = 0;
-	
+
 	if (relX < 0) {
 		startX = 0;
 		lengthX = width + relX;
@@ -269,7 +269,7 @@ void movePixelData(float * data, int relX, int relY) {
 		lengthY = height + relY;
 		destY = -relY;
 	}
-	
+
 	if (relY < 0) {
 		for (int i = lengthY - 1; i >= 0; i--) {
 			memcpy(&data[((destY + i) * width + destX) * 3], &data[((startY + i) * width + startX) * 3], lengthX * sizeof(float) * 3);
@@ -279,18 +279,22 @@ void movePixelData(float * data, int relX, int relY) {
 		for (int i = 0; i < lengthY; i++) {
 			memcpy(&data[((destY + i) * width + destX) * 3], &data[((startY + i) * width + startX) * 3], lengthX * sizeof(float) * 3);
 		}
-	}	
+	}
 }
 
 void updateCellsTab(int relX, int relY) {
-	int startX, startY, endX, endY;
+	int startX, startY, endX, endY, startXY, endXY;
 	if (relX > 0) {
 		startX = floorf(cell_number_col - (float)relX / cell_pixel_width);
 		endX = cell_number_col;
+		startXY = 0;
+		endXY = startX;
 	}
 	else {
 		startX = 0;
 		endX = ceilf(-(float)relX / cell_pixel_width);
+		startXY = endX;
+		endXY = cell_number_col;
 	}
 	if (relY > 0) {
 		startY = floorf(cell_number_row - (float)relY / cell_pixel_height);
@@ -309,7 +313,7 @@ void updateCellsTab(int relX, int relY) {
 		}
 	}
 	for (int y = startY; y < endY; y++) {
-		for (int x = 0; x < cell_number_col; x++) {
+		for (int x = startXY; x < endXY; x++) {
 			cells_to_update[nb_cells_to_update] = x + y * cell_number_col;
 			nb_cells_to_update++;
 		}
@@ -364,7 +368,7 @@ int main(int argc, char** argv) {
 	glfwSetErrorCallback(error_callback);
 
 	glfwSwapInterval(0);
-	
+
 
 	float * data = (float*) malloc(sizeof(float) * width * height * 3);
 
@@ -387,7 +391,7 @@ int main(int argc, char** argv) {
 	long double yscale = (ymax - ymin) / height;
 
 	float ** gradient;
-	int nb_cols = 16;
+	int nb_cols = 10;
 	int interp_size = 256;
 	int size_grad = (nb_cols-1) * interp_size;
 	gradientInterpol(gradient_points, &gradient, nb_cols, interp_size);
@@ -399,7 +403,7 @@ int main(int argc, char** argv) {
 	double prevmouseX = 0;
 	double prevmouseY = 0;
 	glRasterPos2i(-1, -1);
-	
+
 	int num_threads = 16;
 	pthread_t threads[num_threads];
 	args_t arguments[num_threads];
@@ -414,7 +418,7 @@ int main(int argc, char** argv) {
 		arguments[i].xmin = &xmin;
 		arguments[i].ymin = &ymin;
 	}
-	
+
 	cell_number_row = 100;
 	cell_number_col = 100;
 	cell_number = cell_number_row * cell_number_col;
@@ -460,7 +464,7 @@ int main(int argc, char** argv) {
 		}
 		global_count = 0;
 
-		glDrawPixels(width, height, GL_RGB, GL_FLOAT, data);		
+		glDrawPixels(width, height, GL_RGB, GL_FLOAT, data);
 		glfwSwapBuffers(window);
 		glfwPollEvents();
 		printMsPerFrame(&LastTime, &nbFrames);

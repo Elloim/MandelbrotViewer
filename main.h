@@ -44,6 +44,8 @@ void * createThread(void * args);
 
 void thread(float ** gradient, float * data, long double * xscale, long double * yscale, long double * xmin, long double * ymin, int size_grad, int max_n, int cell_index);
 
+void coloring(float ** gradient, float * data, int iter, long double c_r, long double c_i, int size_grad, int max_n, int count);
+
 int globalGetCellIndex();
 
 int globalCountValueInc();
@@ -79,23 +81,38 @@ int height = 1500;
 		{50,  52,  120}
 };*/
 
-int gradient_points[][3] = {
+/*int gradient_points[][3] = {
 		{246,  8,    8},
+		{241, 233, 191},
 		{5,  221,    245},
 		{33,   89,  220},
+		{2,  110,   16},
 		{209,   246,  26},
+		{249,  129, 37},
 		{207,   137, 242},
 		{255,  77,  196},
-		{101,  218,  12},
-		{249,  129, 37},
+		{101,  218,  12},	
 		{213, 174, 143},
 		{67, 157, 236},
-		{241, 233, 191},
+		
 		{173, 103,  242},
 		{201, 14,    14},
 		{206, 101,    101},
-		{2,  110,   16},
 		{160,  111,  235}
+};*/
+
+int gradient_points[][3] = {
+		{241, 233, 191},
+		{5,  221,    245},
+		{209,   246,  26},
+		{249,  129, 37},
+		{207,   137, 242},
+		{255,  77,  196},
+		{101,  218,  12},	
+		{213, 174, 143},
+		
+		{173, 103,  242},
+		{201, 14,    14},
 };
 
 int * cells_to_update;
