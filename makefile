@@ -1,18 +1,18 @@
 CC=gcc
 COPTIONS=-Wall -Wextra -g -O3
-OPENGL=-lGL -lGLU -lglut -lGLEW -lglfw -lX11 -lXxf86vm -lXrandr -lpthread -lXi -ldl -lXinerama -lXcursor -lpthread
+PKGS=glfw3 glew gl
+CFLAGS=$(COPTIONS) $(shell pkg-config --cflags $(PKGS))
+LDFLAGS=$(shell pkg-config --libs $(PKGS)) -lpthread -lm
 OBJECTS=main.o mandelbrot.o
 
-prog:main.o mandelbrot.o makefile
-	$(CC) $(OBJECTS) -o main $(OPENGL) -lm
+prog: $(OBJECTS) makefile
+	$(CC) $(OBJECTS) -o main $(LDFLAGS)
 
-mandelbrot.o:mandelbrot.c mandelbrot.h makefile
-	$(CC) $(COPTIONS) mandelbrot.c -c
+mandelbrot.o: mandelbrot.c mandelbrot.h makefile
+	$(CC) $(CFLAGS) mandelbrot.c -c
 
-main.o:main.c main.h mandelbrot.h mandelbrot.c makefile
-	$(CC) $(COPTIONS) main.c -c
-
-
+main.o: main.c main.h mandelbrot.h makefile
+	$(CC) $(CFLAGS) main.c -c
 
 clean:
-	rm -f *.o
+	rm -f *.o main

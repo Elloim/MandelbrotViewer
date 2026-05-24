@@ -143,13 +143,17 @@ int main(int argc, char** argv) {
 
 	glfwMakeContextCurrent(window);
 
+	glewExperimental = GL_TRUE;
 	GLenum err = glewInit();
-	if (GLEW_OK != err) { 
-		fprintf(stderr, "Error: %s\n", glewGetErrorString(err));
+	/* GLEW_ERROR_NO_GLX_DISPLAY (4 in GLEW 2.2) is expected on Wayland/EGL —
+	 * GLEW can't query GLX because there is no X display. Extensions still load. */
+	if (GLEW_OK != err && err != GLEW_ERROR_NO_GLX_DISPLAY) {
+		fprintf(stderr, "Error: %s (code %d)\n", glewGetErrorString(err), err);
 		glfwDestroyWindow(window);
 		glfwTerminate();
 		return -1;
 	}
+	glGetError(); /* clear any spurious error from glewInit on EGL */
 
 	//glEnable(GL_FRAMEBUFFER_SRGB);
 
