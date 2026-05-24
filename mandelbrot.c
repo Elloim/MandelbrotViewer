@@ -7,8 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
 #include <math.h>
+#include <pthread.h>
 
 #include "mandelbrot.h"
 
@@ -17,12 +17,26 @@ static inline float maxf(float a, float b) { return a > b ? a : b; }
 static inline float minf(float a, float b) { return a < b ? a : b; }
 
 static int mandelbrotFunc(long double * c_r, long double * c_i, int max_n) {
+	long double cr = *c_r;
+	long double ci = *c_i;
+	long double ci2 = ci * ci;
+
+	/* Points in the period-2 bulb (disk of radius 1/4 around -1) and in
+	 * the main cardioid are provably in the set, so they would otherwise
+	 * burn the full max_n iterations. The closed-form tests below cost a
+	 * handful of mults and short-circuit the worst case. */
+	long double cp1 = cr + 1.L;
+	if (cp1 * cp1 + ci2 < 0.0625L) return max_n;
+	long double xm = cr - 0.25L;
+	long double q  = xm * xm + ci2;
+	if (q * (q + xm) < 0.25L * ci2) return max_n;
+
 	int n = 0;
 	long double x = 0.L, y = 0.L, x2 = 0.L, y2 = 0.L;
 
 	while (n < max_n && x2 + y2 < 4.L) {
-		y = 2 * x * y + *c_i;
-		x = x2 - y2 + *c_r;
+		y = 2 * x * y + ci;
+		x = x2 - y2 + cr;
 		x2 = x * x;
 		y2 = y * y;
 		n++;
@@ -55,7 +69,8 @@ static inline void coloring(float * gradient, float * data, int iter,
                             long double c_r, long double c_i,
                             int size_grad, int max_n, int count) {
 	if (iter != max_n) {
-		float nu = logf(log2f(sqrtf((float)(c_r * c_r + c_i * c_i))));
+		/* log2(sqrt(r2)) == 0.5 * log2(r2); skips one transcendental. */
+		float nu = logf(0.5f * log2f((float)(c_r * c_r + c_i * c_i)));
 		float frac = maxf(0.0f, minf((iter + (1.0f - nu)) / max_n, 1.0f));
 		int index = (int)(frac * size_grad) % size_grad;
 		memcpy(&data[count], &gradient[index * 3], sizeof(float) * 3);
@@ -65,14 +80,9 @@ static inline void coloring(float * gradient, float * data, int iter,
 }
 
 static int globalGetCellIndex(void) {
-	int res = -1;
-	pthread_mutex_lock(&global_count_mutex);
-	if (global_count < nb_cells_to_update) {
-		res = cells_to_update[global_count];
-		global_count++;
-	}
-	pthread_mutex_unlock(&global_count_mutex);
-	return res;
+	int idx = __atomic_fetch_add(&global_count, 1, __ATOMIC_RELAXED);
+	if (idx >= nb_cells_to_update) return -1;
+	return cells_to_update[idx];
 }
 
 static void thread(float * gradient, float * data,

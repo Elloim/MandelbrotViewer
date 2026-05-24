@@ -49,7 +49,6 @@ int cell_number_row = 0;
 int cell_number_col = 0;
 int cell_pixel_width = 0;
 int cell_pixel_height = 0;
-pthread_mutex_t global_count_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 
 void error_callback(int error, const char* description) {
@@ -310,7 +309,7 @@ int main(int argc, char** argv) {
 			double t0 = glfwGetTime();
 			for (int i = 0; i < created; i++) pthread_join(threads[i], NULL);
 			thread_wait_ms = (glfwGetTime() - t0) * 1000.0;
-			global_count = 0;
+			__atomic_store_n(&global_count, 0, __ATOMIC_RELAXED);
 			nb_cells_to_update = 0;
 			if (exit_code != 0) break;
 		}
@@ -327,7 +326,6 @@ int main(int argc, char** argv) {
 	free(data);
 	free(gradient);
 	free(cells_to_update);
-	pthread_mutex_destroy(&global_count_mutex);
 	glfwDestroyWindow(window);
 	glfwTerminate();
 	return exit_code;

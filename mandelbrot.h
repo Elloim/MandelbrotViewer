@@ -7,8 +7,6 @@
 #ifndef mandelbrot_h
 #define mandelbrot_h
 
-#include <pthread.h>
-
 typedef struct args_t {
 	float * gradient;       /* flat RGB triplets, size_grad * 3 floats */
 	float * data;
@@ -39,6 +37,5 @@ extern int cell_number_row;
 extern int cell_number_col;
 extern int cell_pixel_width;
 extern int cell_pixel_height;
-extern pthread_mutex_t global_count_mutex;
 
 #endif
