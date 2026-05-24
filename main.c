@@ -50,6 +50,12 @@ int cell_number_col = 0;
 int cell_pixel_width = 0;
 int cell_pixel_height = 0;
 
+int prec_force_mode = 0;   /* updated each frame from debugGetPrecMode() */
+
+/* Held-button zoom rate, in view-shrinkage factor per real-time second.
+ * 4× means holding middle-click for 1s zooms in by 4×. */
+#define ZOOM_PER_SECOND 4.0L
+
 
 void error_callback(int error, const char* description) {
 	fprintf(stderr, "Erreur glfw num %d : %s\n", error, description);
@@ -71,12 +77,13 @@ static void markAllCellsDirty(void) {
 	nb_cells_to_update = cell_number;
 }
 
-void moveAround(GLFWwindow* window, float * data,
+void moveAround(GLFWwindow* window, unsigned char * data,
                 long double* xmin, long double* xmax,
                 long double* ymin, long double* ymax,
                 long double xscale, long double yscale,
                 double prevmouseX, double prevmouseY,
-                double mouseX, double mouseY) {
+                double mouseX, double mouseY,
+                double dt) {
 
 	if (glfwGetMouseButton(window, 0)) {
 		int dx = (int)(prevmouseX - mouseX);
@@ -100,24 +107,20 @@ void moveAround(GLFWwindow* window, float * data,
 		return;
 	}
 
-	if (glfwGetMouseButton(window, 1)) {
-		long double xlength = (*xmax - *xmin) / 10;
-		long double ylength = (*ymax - *ymin) / 10;
-		*xmin -= xlength;
-		*xmax += xlength;
-		*ymin -= ylength;
-		*ymax += ylength;
-		markAllCellsDirty();
-		return;
-	}
-
-	if (glfwGetMouseButton(window, 2)) {
-		long double xlength = (*xmax - *xmin) / 10;
-		long double ylength = (*ymax - *ymin) / 10;
-		*xmin += xlength;
-		*xmax -= xlength;
-		*ymin += ylength;
-		*ymax -= ylength;
+	int zoom_in  = glfwGetMouseButton(window, 2);
+	int zoom_out = glfwGetMouseButton(window, 1);
+	if (zoom_in || zoom_out) {
+		/* Time-based factor → constant zoom rate independent of FPS. */
+		long double factor = powl(ZOOM_PER_SECOND, (long double)dt);
+		/* Pixel buffer row 0 sits at the bottom (glRasterPos2i(-1,-1)), so
+		 * the cursor's Y must be flipped relative to the window. */
+		long double mx = *xmin + (long double)mouseX * xscale;
+		long double my = *ymax - (long double)mouseY * yscale;
+		long double k = zoom_in ? (1.0L / factor) : factor;
+		*xmin = mx + (*xmin - mx) * k;
+		*xmax = mx + (*xmax - mx) * k;
+		*ymin = my + (*ymin - my) * k;
+		*ymax = my + (*ymax - my) * k;
 		markAllCellsDirty();
 	}
 }
@@ -171,12 +174,16 @@ int main(int argc, char** argv) {
 	glfwSetMouseButtonCallback(window, debugMouseButtonCallback);
 	glfwSwapInterval(0);
 
+	/* RGB8 rows aren't always 4-byte aligned (e.g. odd width); default GL
+	 * unpack alignment is 4 and would mis-read the buffer. */
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
 	debugInit(max_n);
 
 	/* Use actual framebuffer size — may differ from requested on HiDPI/Wayland. */
 	glfwGetFramebufferSize(window, &width, &height);
 
-	float * data = (float*) calloc((size_t)width * height * 3, sizeof(float));
+	unsigned char * data = (unsigned char *) calloc((size_t)width * height * 3, sizeof(unsigned char));
 	if (!data) {
 		fprintf(stderr, "Failed to allocate pixel buffer\n");
 		glfwDestroyWindow(window);
@@ -192,7 +199,7 @@ int main(int argc, char** argv) {
 	long double xscale = (xmax - xmin) / width;
 	long double yscale = (ymax - ymin) / height;
 
-	float * gradient = NULL;
+	unsigned char * gradient = NULL;
 	int nb_cols = 10;
 	int interp_size = 256;
 	int size_grad = (nb_cols - 1) * interp_size;
@@ -223,6 +230,7 @@ int main(int argc, char** argv) {
 	}
 
 	double LastTime = glfwGetTime();
+	double prev_time = LastTime;
 	int nbFrames = 0;
 	double mouseX = 0, mouseY = 0;
 	double prevmouseX = 0, prevmouseY = 0;
@@ -236,6 +244,13 @@ int main(int argc, char** argv) {
 
 	while (!glfwWindowShouldClose(window)) {
 
+		double now = glfwGetTime();
+		double dt = now - prev_time;
+		prev_time = now;
+		/* Cap on first frame and after long pauses so a giant dt doesn't
+		 * teleport the zoom in a single step. */
+		if (dt > 0.1) dt = 0.1;
+
 		prevmouseX = mouseX;
 		prevmouseY = mouseY;
 		glfwGetFramebufferSize(window, &width, &height);
@@ -248,7 +263,7 @@ int main(int argc, char** argv) {
 		}
 
 		if (width != prev_width || height != prev_height) {
-			float * new_data = (float*) realloc(data, (size_t)width * height * 3 * sizeof(float));
+			unsigned char * new_data = (unsigned char *) realloc(data, (size_t)width * height * 3 * sizeof(unsigned char));
 			if (!new_data) {
 				fprintf(stderr, "Failed to realloc pixel buffer on resize\n");
 				exit_code = -1;
@@ -277,6 +292,7 @@ int main(int argc, char** argv) {
 		glClear(GL_COLOR_BUFFER_BIT);
 
 		debugUpdateMouse(window, mouseX, mouseY);
+		prec_force_mode = debugGetPrecMode();
 		if (debugConsumeDirty()) {
 			int new_max_n = debugGetMaxN();
 			for (int i = 0; i < num_threads; i++) arguments[i].max_n = new_max_n;
@@ -285,7 +301,7 @@ int main(int argc, char** argv) {
 
 		if (!debugCapturesMouse()) {
 			moveAround(window, data, &xmin, &xmax, &ymin, &ymax,
-			           xscale, yscale, prevmouseX, prevmouseY, mouseX, mouseY);
+			           xscale, yscale, prevmouseX, prevmouseY, mouseX, mouseY, dt);
 		}
 
 		xscale = (xmax - xmin) / width;
@@ -315,7 +331,7 @@ int main(int argc, char** argv) {
 		}
 		debugRecordThreadWait(thread_wait_ms);
 
-		glDrawPixels(width, height, GL_RGB, GL_FLOAT, data);
+		glDrawPixels(width, height, GL_RGB, GL_UNSIGNED_BYTE, data);
 		debugDrawCellGrid(width, height, cell_number_row, cell_number_col);
 		debugRender(width, height);
 		glfwSwapBuffers(window);

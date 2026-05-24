@@ -16,40 +16,42 @@
 static inline float maxf(float a, float b) { return a > b ? a : b; }
 static inline float minf(float a, float b) { return a < b ? a : b; }
 
-static int mandelbrotFunc(long double * c_r, long double * c_i, int max_n) {
-	long double cr = *c_r;
-	long double ci = *c_i;
-	long double ci2 = ci * ci;
-
-	/* Points in the period-2 bulb (disk of radius 1/4 around -1) and in
-	 * the main cardioid are provably in the set, so they would otherwise
-	 * burn the full max_n iterations. The closed-form tests below cost a
-	 * handful of mults and short-circuit the worst case. */
-	long double cp1 = cr + 1.L;
-	if (cp1 * cp1 + ci2 < 0.0625L) return max_n;
-	long double xm = cr - 0.25L;
-	long double q  = xm * xm + ci2;
-	if (q * (q + xm) < 0.25L * ci2) return max_n;
-
-	int n = 0;
-	long double x = 0.L, y = 0.L, x2 = 0.L, y2 = 0.L;
-
-	while (n < max_n && x2 + y2 < 4.L) {
-		y = 2 * x * y + ci;
-		x = x2 - y2 + cr;
-		x2 = x * x;
-		y2 = y * y;
-		n++;
-	}
-
-	*c_r = x;
-	*c_i = y;
-	return n;
+/* Type-specialized iteration kernel. Body is identical apart from the
+ * floating-point type: `double` runs on SSE2 and auto-vectorizes; `long
+ * double` runs on the x87 FPU (much slower) and is only needed once xscale
+ * drops below double's per-pixel resolution. The cardioid + period-2 bulb
+ * tests short-circuit the largest interior regions, where iteration would
+ * otherwise burn the full max_n. */
+#define DEFINE_MANDELBROT_FN(NAME, T)                                          \
+static int NAME(T *c_r, T *c_i, int max_n) {                                   \
+	T cr = *c_r;                                                               \
+	T ci = *c_i;                                                               \
+	T ci2 = ci * ci;                                                           \
+	T cp1 = cr + (T)1;                                                         \
+	if (cp1 * cp1 + ci2 < (T)0.0625) return max_n;                             \
+	T xm = cr - (T)0.25;                                                       \
+	T q  = xm * xm + ci2;                                                      \
+	if (q * (q + xm) < (T)0.25 * ci2) return max_n;                            \
+	int n = 0;                                                                 \
+	T x = 0, y = 0, x2 = 0, y2 = 0;                                            \
+	while (n < max_n && x2 + y2 < (T)4) {                                      \
+		y = (T)2 * x * y + ci;                                                 \
+		x = x2 - y2 + cr;                                                      \
+		x2 = x * x;                                                            \
+		y2 = y * y;                                                            \
+		n++;                                                                   \
+	}                                                                          \
+	*c_r = x;                                                                  \
+	*c_i = y;                                                                  \
+	return n;                                                                  \
 }
 
-void gradientInterpol(int points[][3], float ** gradient, int nb_points, int nb_gradient) {
+DEFINE_MANDELBROT_FN(mandelbrotFuncD, double)
+DEFINE_MANDELBROT_FN(mandelbrotFuncL, long double)
+
+void gradientInterpol(int points[][3], unsigned char ** gradient, int nb_points, int nb_gradient) {
 	int total = (nb_points - 1) * nb_gradient;
-	*gradient = (float*) malloc(sizeof(float) * total * 3);
+	*gradient = (unsigned char *) malloc((size_t)total * 3);
 
 	int count = 0;
 	for (int i = 0; i < nb_points - 1; i++) {
@@ -57,25 +59,27 @@ void gradientInterpol(int points[][3], float ** gradient, int nb_points, int nb_
 		float gslope = (float)(points[i+1][1] - points[i][1]) / nb_gradient;
 		float bslope = (float)(points[i+1][2] - points[i][2]) / nb_gradient;
 		for (int j = 0; j < nb_gradient; j++) {
-			(*gradient)[count * 3 + 0] = (rslope * j + points[i][0]) / 255.0f;
-			(*gradient)[count * 3 + 1] = (gslope * j + points[i][1]) / 255.0f;
-			(*gradient)[count * 3 + 2] = (bslope * j + points[i][2]) / 255.0f;
+			(*gradient)[count * 3 + 0] = (unsigned char)(rslope * j + points[i][0]);
+			(*gradient)[count * 3 + 1] = (unsigned char)(gslope * j + points[i][1]);
+			(*gradient)[count * 3 + 2] = (unsigned char)(bslope * j + points[i][2]);
 			count++;
 		}
 	}
 }
 
-static inline void coloring(float * gradient, float * data, int iter,
-                            long double c_r, long double c_i,
+static inline void coloring(unsigned char * gradient, unsigned char * data, int iter,
+                            double c_r, double c_i,
                             int size_grad, int max_n, int count) {
 	if (iter != max_n) {
 		/* log2(sqrt(r2)) == 0.5 * log2(r2); skips one transcendental. */
 		float nu = logf(0.5f * log2f((float)(c_r * c_r + c_i * c_i)));
 		float frac = maxf(0.0f, minf((iter + (1.0f - nu)) / max_n, 1.0f));
 		int index = (int)(frac * size_grad) % size_grad;
-		memcpy(&data[count], &gradient[index * 3], sizeof(float) * 3);
+		memcpy(&data[count], &gradient[index * 3], 3);
 	} else {
-		memset(&data[count], 0, 3 * sizeof(float));
+		data[count + 0] = 0;
+		data[count + 1] = 0;
+		data[count + 2] = 0;
 	}
 }
 
@@ -85,44 +89,74 @@ static int globalGetCellIndex(void) {
 	return cells_to_update[idx];
 }
 
-static void thread(float * gradient, float * data,
-                   long double * xscale, long double * yscale,
-                   long double * xmin, long double * ymin,
-                   int size_grad, int max_n) {
-	int cell_index;
-	while ((cell_index = globalGetCellIndex()) != -1) {
-		int row = cell_index / cell_number_col;
-		int col = cell_index % cell_number_col;
-		/* Proportional cell boundaries: the last row/column reaches exactly
-		 * width/height regardless of whether the dimensions divide evenly. */
-		int line_start = (int)((long)row * height / cell_number_row);
-		int line_end   = (int)((long)(row + 1) * height / cell_number_row);
-		int col_start  = (int)((long)col * width / cell_number_col);
-		int col_end    = (int)((long)(col + 1) * width / cell_number_col);
-
-		for (int i = line_start; i < line_end; i++) {
-			long double c_i_base = *ymin + i * *yscale;
-			for (int j = col_start; j < col_end; j++) {
-				long double c_r = *xmin + j * *xscale;
-				long double c_i = c_i_base;
-				int iter = mandelbrotFunc(&c_r, &c_i, max_n);
-				int count = (i * width + j) * 3;
-				coloring(gradient, data, iter, c_r, c_i, size_grad, max_n, count);
-			}
-		}
-	}
+/* Type-specialized worker body. Threads pull cells off the global queue and
+ * fill in their pixels at type T precision (double or long double). */
+#define DEFINE_THREAD_FN(NAME, T, MFN)                                         \
+static void NAME(unsigned char * gradient, unsigned char * data,               \
+                 T xmin, T ymin, T xscale, T yscale,                           \
+                 int size_grad, int max_n) {                                   \
+	int cell_index;                                                            \
+	while ((cell_index = globalGetCellIndex()) != -1) {                        \
+		int row = cell_index / cell_number_col;                                \
+		int col = cell_index % cell_number_col;                                \
+		/* Proportional cell boundaries: the last row/column reaches exactly   \
+		 * width/height regardless of whether the dimensions divide evenly. */ \
+		int line_start = (int)((long)row * height / cell_number_row);          \
+		int line_end   = (int)((long)(row + 1) * height / cell_number_row);    \
+		int col_start  = (int)((long)col * width / cell_number_col);           \
+		int col_end    = (int)((long)(col + 1) * width / cell_number_col);     \
+		for (int i = line_start; i < line_end; i++) {                          \
+			T c_i_base = ymin + i * yscale;                                    \
+			for (int j = col_start; j < col_end; j++) {                        \
+				T c_r = xmin + j * xscale;                                     \
+				T c_i = c_i_base;                                              \
+				int iter = MFN(&c_r, &c_i, max_n);                             \
+				int count = (i * width + j) * 3;                               \
+				coloring(gradient, data, iter,                                 \
+				         (double)c_r, (double)c_i,                             \
+				         size_grad, max_n, count);                             \
+			}                                                                  \
+		}                                                                      \
+	}                                                                          \
 }
+
+DEFINE_THREAD_FN(threadD, double,      mandelbrotFuncD)
+DEFINE_THREAD_FN(threadL, long double, mandelbrotFuncL)
 
 void * createThread(void * args) {
 	args_t * vals = args;
-	thread(vals->gradient, vals->data,
-	       vals->xscale, vals->yscale,
-	       vals->xmin, vals->ymin,
-	       vals->size_grad, vals->max_n);
+	long double xscale = *vals->xscale;
+	long double yscale = *vals->yscale;
+	long double xmin   = *vals->xmin;
+	long double ymin   = *vals->ymin;
+
+	/* In auto mode, fall back to long double once per-pixel scale approaches
+	 * double's ~15-17 decimal digits — below that, neighboring pixels collide
+	 * and the image bands. The override lets the debug widget pin a mode for
+	 * A/B comparison. */
+	int use_double;
+	if (prec_force_mode == 1) {
+		use_double = 1;
+	} else if (prec_force_mode == 2) {
+		use_double = 0;
+	} else {
+		use_double = (xscale > 1e-13L && yscale > 1e-13L);
+	}
+
+	if (use_double) {
+		threadD(vals->gradient, vals->data,
+		        (double)xmin, (double)ymin,
+		        (double)xscale, (double)yscale,
+		        vals->size_grad, vals->max_n);
+	} else {
+		threadL(vals->gradient, vals->data,
+		        xmin, ymin, xscale, yscale,
+		        vals->size_grad, vals->max_n);
+	}
 	pthread_exit(NULL);
 }
 
-void movePixelData(float * data, int relX, int relY) {
+void movePixelData(unsigned char * data, int relX, int relY) {
 	int startX, startY, lengthX, lengthY, destX, destY;
 
 	if (relX < 0) {
@@ -148,7 +182,7 @@ void movePixelData(float * data, int relX, int relY) {
 	/* Pan larger than the window leaves nothing usable. */
 	if (lengthX <= 0 || lengthY <= 0) return;
 
-	size_t row_bytes = (size_t)lengthX * 3 * sizeof(float);
+	size_t row_bytes = (size_t)lengthX * 3;
 	if (relY < 0) {
 		for (int i = lengthY - 1; i >= 0; i--) {
 			memmove(&data[((destY + i) * width + destX) * 3],

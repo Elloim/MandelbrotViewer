@@ -14,7 +14,11 @@ void debugInit(int initial_max_n);
 
 int  debugGetMaxN(void);
 
-/* True (once) if a slider edit changed max_n since the last call. */
+/* Precision mode for the Mandelbrot iteration. 0 = auto (xscale threshold),
+ * 1 = force double, 2 = force long double. Cycled by the widget button. */
+int  debugGetPrecMode(void);
+
+/* True (once) if a slider/button edit changed something since the last call. */
 int  debugConsumeDirty(void);
 
 /* True while a mouse gesture inside the widget owns the pointer — callers

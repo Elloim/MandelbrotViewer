@@ -8,8 +8,8 @@
 #define mandelbrot_h
 
 typedef struct args_t {
-	float * gradient;       /* flat RGB triplets, size_grad * 3 floats */
-	float * data;
+	unsigned char * gradient;   /* flat RGB triplets, size_grad * 3 bytes */
+	unsigned char * data;       /* framebuffer, width*height*3 bytes (RGB8) */
 	long double * xscale;
 	long double * yscale;
 	long double * xmin;
@@ -19,10 +19,10 @@ typedef struct args_t {
 } args_t;
 
 /* Public API */
-void gradientInterpol(int points[][3], float ** gradient, int nb_points, int nb_gradients);
+void gradientInterpol(int points[][3], unsigned char ** gradient, int nb_points, int nb_gradients);
 void * createThread(void * args);
 void updateCellsTab(int relX, int relY);
-void movePixelData(float * data, int relX, int relY);
+void movePixelData(unsigned char * data, int relX, int relY);
 
 /* Shared state — defined in main.c */
 extern int width;
@@ -37,5 +37,8 @@ extern int cell_number_row;
 extern int cell_number_col;
 extern int cell_pixel_width;
 extern int cell_pixel_height;
+
+/* 0 = auto (xscale threshold), 1 = force double, 2 = force long double. */
+extern int prec_force_mode;
 
 #endif

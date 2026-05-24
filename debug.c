@@ -129,7 +129,8 @@ static const unsigned char font8x8[96][8] = {
 static struct {
 	int visible;
 	int max_n;
-	int dirty;        /* slider edited since last debugConsumeDirty()  */
+	int prec_mode;    /* 0=auto, 1=force double, 2=force long double   */
+	int dirty;        /* slider/button edited since debugConsumeDirty()*/
 	int dragging;     /* slider knob is being dragged                  */
 	int captured;     /* a press inside the widget owns the gesture    */
 
@@ -146,6 +147,7 @@ static struct {
 	int line_h;
 	int wx, wy, ww, wh;
 	int sx, sy, sw, sh;
+	int bx, by, bw, bh;   /* precision toggle button rect             */
 } dbg;
 
 static void recomputeLayout(int fb_h) {
@@ -156,6 +158,7 @@ static void recomputeLayout(int fb_h) {
 
 	/* The widest line is "thread wait: 9999.99 ms" — budget ~22 glyphs. */
 	int inner_w = 22 * 8 * s;
+	int button_h = 8 * s + 8;
 
 	dbg.wx = WIDGET_X;
 	dbg.wy = WIDGET_Y;
@@ -165,6 +168,7 @@ static void recomputeLayout(int fb_h) {
 	       + LINE_SPACING + 3 * dbg.line_h        /* three stat lines   */
 	       + LINE_SPACING + dbg.line_h            /* max_n label        */
 	       + 6 + SLIDER_HEIGHT                    /* slider strip       */
+	       + LINE_SPACING + button_h              /* precision button   */
 	       + WIDGET_PAD;
 
 	dbg.sx = dbg.wx + WIDGET_PAD;
@@ -175,6 +179,11 @@ static void recomputeLayout(int fb_h) {
 	       + LINE_SPACING + dbg.line_h
 	       + 6;
 	dbg.sh = SLIDER_HEIGHT;
+
+	dbg.bx = dbg.wx + WIDGET_PAD;
+	dbg.by = dbg.sy + dbg.sh + LINE_SPACING;
+	dbg.bw = inner_w;
+	dbg.bh = button_h;
 }
 
 void debugInit(int initial_max_n) {
@@ -186,6 +195,7 @@ void debugInit(int initial_max_n) {
 }
 
 int debugGetMaxN(void)        { return dbg.max_n; }
+int debugGetPrecMode(void)    { return dbg.prec_mode; }
 int debugCapturesMouse(void)  { return dbg.captured; }
 
 int debugConsumeDirty(void) {
@@ -277,6 +287,9 @@ void debugMouseButtonCallback(GLFWwindow* window, int button, int action, int mo
 		    fb_my >= dbg.sy - margin && fb_my <= dbg.sy + dbg.sh + margin) {
 			dbg.dragging = 1;
 			setMaxNFromSlider(fb_mx);
+		} else if (pointInRect(fb_mx, fb_my, dbg.bx, dbg.by, dbg.bw, dbg.bh)) {
+			dbg.prec_mode = (dbg.prec_mode + 1) % 3;
+			dbg.dirty = 1;
 		}
 	}
 }
@@ -449,6 +462,26 @@ void debugRender(int win_w, int win_h) {
 	int knob_x = dbg.sx + fill_w - KNOB_WIDTH / 2;
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 	drawQuad(knob_x, dbg.sy - 2, KNOB_WIDTH, dbg.sh + 4);
+
+	/* Precision toggle button — click to cycle auto / double / long double. */
+	glColor4f(0.15f, 0.18f, 0.22f, 0.95f);
+	drawQuad(dbg.bx, dbg.by, dbg.bw, dbg.bh);
+	glColor4f(1.0f, 1.0f, 1.0f, 0.4f);
+	glBegin(GL_LINE_LOOP);
+	glVertex2i(dbg.bx,           dbg.by);
+	glVertex2i(dbg.bx + dbg.bw,  dbg.by);
+	glVertex2i(dbg.bx + dbg.bw,  dbg.by + dbg.bh);
+	glVertex2i(dbg.bx,           dbg.by + dbg.bh);
+	glEnd();
+
+	const char* prec_label;
+	switch (dbg.prec_mode) {
+		case 1:  prec_label = "prec: double";  break;
+		case 2:  prec_label = "prec: ldouble"; break;
+		default: prec_label = "prec: auto";    break;
+	}
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	drawText(dbg.bx + 6, dbg.by + (dbg.bh - 8 * s) / 2, prec_label, s);
 
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 

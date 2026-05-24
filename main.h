@@ -13,11 +13,12 @@ void error_callback(int error, const char* description);
 
 void printMsPerFrame(double* LastTime, int* nbFrames);
 
-void moveAround(GLFWwindow* window, float * data,
+void moveAround(GLFWwindow* window, unsigned char * data,
                 long double* xmin, long double* xmax,
                 long double* ymin, long double* ymax,
                 long double xscale, long double yscale,
                 double prevmouseX, double prevmouseY,
-                double mouseX, double mouseY);
+                double mouseX, double mouseY,
+                double dt);
 
 #endif
