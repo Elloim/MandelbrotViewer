@@ -316,6 +316,7 @@ int main(int argc, char** argv) {
 		debugRecordThreadWait(thread_wait_ms);
 
 		glDrawPixels(width, height, GL_RGB, GL_FLOAT, data);
+		debugDrawCellGrid(width, height, cell_number_row, cell_number_col);
 		debugRender(width, height);
 		glfwSwapBuffers(window);
 		glfwPollEvents();

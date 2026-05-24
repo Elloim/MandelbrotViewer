@@ -37,6 +37,11 @@ void debugTick(double now);
 /* Record this frame's pthread_join wall-clock wait in milliseconds. */
 void debugRecordThreadWait(double wait_ms);
 
+/* Draw the cell-grid outlines in green (no-op when hidden). Must use the
+ * same proportional row/col math as the compute path so the lines align
+ * with actual cell boundaries. */
+void debugDrawCellGrid(int win_w, int win_h, int rows, int cols);
+
 /* Draw the overlay (no-op when hidden). win_w/win_h are framebuffer pixels. */
 void debugRender(int win_w, int win_h);
 

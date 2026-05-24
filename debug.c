@@ -329,6 +329,49 @@ static void drawText(int x, int y, const char* text, int scale) {
 	glEnd();
 }
 
+void debugDrawCellGrid(int win_w, int win_h, int rows, int cols) {
+	if (!dbg.visible) return;
+	if (rows <= 0 || cols <= 0) return;
+
+	GLboolean had_depth = glIsEnabled(GL_DEPTH_TEST);
+	GLboolean had_blend = glIsEnabled(GL_BLEND);
+
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix();
+	glLoadIdentity();
+	glOrtho(0, win_w, win_h, 0, -1, 1);
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
+	glLoadIdentity();
+
+	glDisable(GL_DEPTH_TEST);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glLineWidth(1.0f);
+	glColor4f(0.0f, 1.0f, 0.0f, 0.35f);
+
+	glBegin(GL_LINES);
+	for (int c = 0; c <= cols; c++) {
+		int x = (int)((long)c * win_w / cols);
+		glVertex2i(x, 0);
+		glVertex2i(x, win_h);
+	}
+	for (int r = 0; r <= rows; r++) {
+		int y = (int)((long)r * win_h / rows);
+		glVertex2i(0,     y);
+		glVertex2i(win_w, y);
+	}
+	glEnd();
+
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glMatrixMode(GL_MODELVIEW);
+	glPopMatrix();
+
+	if (!had_blend) glDisable(GL_BLEND);
+	if (had_depth)  glEnable(GL_DEPTH_TEST);
+}
+
 void debugRender(int win_w, int win_h) {
 	if (!dbg.visible) return;
 
