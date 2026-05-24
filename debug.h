@@ -1,8 +1,9 @@
 /*
  * name : debug.h
  * Toggleable on-screen debug widget: live FPS / ms-per-frame / thread-wait
- * readouts plus a slider for max_n. Drawn with legacy OpenGL so it composites
- * on top of the existing glDrawPixels output.
+ * readouts, sliders for max_n and zoom rate, zoom-level readout, plus
+ * label-then-square toggle buttons for precision, texture upload, SIMD,
+ * and arg-hoisting.
  */
 
 #ifndef debug_h
@@ -14,15 +15,29 @@ void debugInit(int initial_max_n);
 
 int  debugGetMaxN(void);
 
-/* Precision mode for the Mandelbrot iteration. 0 = auto (xscale threshold),
- * 1 = force double, 2 = force long double. Cycled by the widget button. */
+/* 0=auto (xscale threshold), 1=force double, 2=force long double. */
 int  debugGetPrecMode(void);
 
-/* True (once) if a slider/button edit changed something since the last call. */
+/* 0=glDrawPixels (legacy), 1=textured quad path. */
+int  debugGetTextureMode(void);
+
+/* 0=scalar inner loop, 1=AVX2 SIMD inner loop. */
+int  debugGetSimdMode(void);
+
+/* 0=pointer-deref args inside hot loop, 1=hoisted by-value args. */
+int  debugGetHoistMode(void);
+
+/* Held-button zoom rate (factor per second). */
+long double debugGetZoomPerSec(void);
+
+/* Main.c pushes the current zoom level once per frame for the readout. */
+void debugSetCurrentZoom(long double zoom);
+
+/* True (once) if a slider/button edit changed something since last call. */
 int  debugConsumeDirty(void);
 
 /* True while a mouse gesture inside the widget owns the pointer — callers
- * should skip pan/zoom handling so clicks on the slider don't also move the
+ * should skip pan/zoom handling so clicks on the widget don't also move the
  * fractal. */
 int  debugCapturesMouse(void);
 

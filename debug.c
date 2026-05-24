@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -21,6 +22,15 @@
 #define KNOB_WIDTH     10
 #define MAX_N_MIN      10
 #define MAX_N_MAX      5000
+
+/* Held-button zoom-rate slider bounds (factor per real-time second). */
+#define ZOOM_RATE_MIN  1.2L
+#define ZOOM_RATE_MAX  20.0L
+
+/* Drag-target identifiers used while a slider knob is being dragged. */
+#define DRAG_NONE       0
+#define DRAG_MAX_N      1
+#define DRAG_ZOOM_RATE  2
 
 /*
  * 8x8 bitmap font — Daniel Hepper's font8x8_basic, released to the public
@@ -129,10 +139,16 @@ static const unsigned char font8x8[96][8] = {
 static struct {
 	int visible;
 	int max_n;
-	int prec_mode;    /* 0=auto, 1=force double, 2=force long double   */
-	int dirty;        /* slider/button edited since debugConsumeDirty()*/
-	int dragging;     /* slider knob is being dragged                  */
-	int captured;     /* a press inside the widget owns the gesture    */
+	int prec_mode;        /* 0=auto, 1=force double, 2=force long double  */
+	int texture_mode;     /* 0=glDrawPixels, 1=textured quad              */
+	int simd_mode;        /* 0=scalar, 1=AVX2                             */
+	int hoist_mode;       /* 0=pointer-deref args, 1=hoisted-by-value     */
+	double zoom_rate_t;   /* slider position [0,1] for the zoom rate      */
+	long double current_zoom; /* main.c pushes this for the readout       */
+
+	int dirty;            /* slider/button edited since debugConsumeDirty */
+	int dragging;         /* DRAG_*: which slider knob is owned           */
+	int captured;         /* a press inside the widget owns the gesture   */
 
 	/* Per-second stats */
 	double last_update;
@@ -146,9 +162,37 @@ static struct {
 	int scale;
 	int line_h;
 	int wx, wy, ww, wh;
+
+	/* max_n slider */
 	int sx, sy, sw, sh;
-	int bx, by, bw, bh;   /* precision toggle button rect             */
+
+	/* zoom-rate slider + label */
+	int zr_label_y;
+	int zsx, zsy, zsw, zsh;
+
+	/* zoom-value readout */
+	int zoom_value_y;
+
+	/* Toggle rows — each is a label at row_y and a square at (sq_x, sq_y). */
+	int sq_x;
+	int sq_sz;
+	int prec_y;
+	int tex_y;
+	int simd_y;
+	int hoist_y;
 } dbg;
+
+static long double zoomRateFromT(double t) {
+	if (t < 0.0) t = 0.0;
+	if (t > 1.0) t = 1.0;
+	return ZOOM_RATE_MIN * powl(ZOOM_RATE_MAX / ZOOM_RATE_MIN, (long double)t);
+}
+
+static double tFromZoomRate(long double r) {
+	if (r < ZOOM_RATE_MIN) r = ZOOM_RATE_MIN;
+	if (r > ZOOM_RATE_MAX) r = ZOOM_RATE_MAX;
+	return (double)(logl(r / ZOOM_RATE_MIN) / logl(ZOOM_RATE_MAX / ZOOM_RATE_MIN));
+}
 
 static void recomputeLayout(int fb_h) {
 	int s = fb_h / 750;
@@ -156,47 +200,77 @@ static void recomputeLayout(int fb_h) {
 	dbg.scale = s;
 	dbg.line_h = 8 * s + LINE_SPACING;
 
-	/* The widest line is "thread wait: 9999.99 ms" — budget ~22 glyphs. */
-	int inner_w = 22 * 8 * s;
-	int button_h = 8 * s + 8;
+	/* Widest line of text: "thread wait: 9999.99 ms" or "texture upload" + */
+	/* gap + square. 24 glyphs covers both with breathing room.             */
+	int inner_w = 24 * 8 * s;
+	int sq_sz = 8 * s + 4;
 
 	dbg.wx = WIDGET_X;
 	dbg.wy = WIDGET_Y;
 	dbg.ww = inner_w + 2 * WIDGET_PAD;
-	dbg.wh = WIDGET_PAD
-	       + dbg.line_h                          /* title              */
-	       + LINE_SPACING + 3 * dbg.line_h        /* three stat lines   */
-	       + LINE_SPACING + dbg.line_h            /* max_n label        */
-	       + 6 + SLIDER_HEIGHT                    /* slider strip       */
-	       + LINE_SPACING + button_h              /* precision button   */
-	       + WIDGET_PAD;
 
+	int y = dbg.wy + WIDGET_PAD;
+	y += dbg.line_h;                 /* title                              */
+	y += LINE_SPACING;
+	y += 3 * dbg.line_h;              /* FPS / ms / thread wait             */
+	y += LINE_SPACING;
+
+	y += dbg.line_h;                 /* max_n label                        */
+	y += 6;
 	dbg.sx = dbg.wx + WIDGET_PAD;
+	dbg.sy = y;
 	dbg.sw = inner_w;
-	dbg.sy = dbg.wy + WIDGET_PAD
-	       + dbg.line_h
-	       + LINE_SPACING + 3 * dbg.line_h
-	       + LINE_SPACING + dbg.line_h
-	       + 6;
 	dbg.sh = SLIDER_HEIGHT;
+	y += dbg.sh;
+	y += LINE_SPACING;
 
-	dbg.bx = dbg.wx + WIDGET_PAD;
-	dbg.by = dbg.sy + dbg.sh + LINE_SPACING;
-	dbg.bw = inner_w;
-	dbg.bh = button_h;
+	dbg.zr_label_y = y;
+	y += dbg.line_h;                 /* zoom rate label                    */
+	y += 6;
+	dbg.zsx = dbg.wx + WIDGET_PAD;
+	dbg.zsy = y;
+	dbg.zsw = inner_w;
+	dbg.zsh = SLIDER_HEIGHT;
+	y += dbg.zsh;
+	y += LINE_SPACING;
+
+	dbg.zoom_value_y = y;
+	y += dbg.line_h;                 /* zoom value readout                 */
+	y += LINE_SPACING;
+
+	dbg.sq_sz = sq_sz;
+	dbg.sq_x = dbg.wx + dbg.ww - WIDGET_PAD - sq_sz;
+	dbg.prec_y  = y; y += dbg.line_h;
+	dbg.tex_y   = y; y += dbg.line_h;
+	dbg.simd_y  = y; y += dbg.line_h;
+	dbg.hoist_y = y; y += dbg.line_h;
+
+	y += WIDGET_PAD;
+	dbg.wh = y - dbg.wy;
 }
 
 void debugInit(int initial_max_n) {
 	memset(&dbg, 0, sizeof(dbg));
 	dbg.visible = 1;
 	dbg.max_n = initial_max_n;
+	dbg.zoom_rate_t = tFromZoomRate(4.0L);
+	dbg.texture_mode = 1;       /* optimized defaults                       */
+	dbg.simd_mode = 1;
+	dbg.hoist_mode = 1;
+	dbg.current_zoom = 1.0L;
 	dbg.last_update = glfwGetTime();
 	recomputeLayout(1500);
 }
 
-int debugGetMaxN(void)        { return dbg.max_n; }
-int debugGetPrecMode(void)    { return dbg.prec_mode; }
-int debugCapturesMouse(void)  { return dbg.captured; }
+int debugGetMaxN(void)         { return dbg.max_n; }
+int debugGetPrecMode(void)     { return dbg.prec_mode; }
+int debugGetTextureMode(void)  { return dbg.texture_mode; }
+int debugGetSimdMode(void)     { return dbg.simd_mode; }
+int debugGetHoistMode(void)    { return dbg.hoist_mode; }
+int debugCapturesMouse(void)   { return dbg.captured; }
+
+long double debugGetZoomPerSec(void) { return zoomRateFromT(dbg.zoom_rate_t); }
+void        debugSetCurrentZoom(long double zoom) { dbg.current_zoom = zoom; }
 
 int debugConsumeDirty(void) {
 	int d = dbg.dirty;
@@ -226,7 +300,7 @@ void debugKeyCallback(GLFWwindow* window, int key, int scancode, int action, int
 	if (key == GLFW_KEY_M && action == GLFW_PRESS) {
 		dbg.visible = !dbg.visible;
 		if (!dbg.visible) {
-			dbg.dragging = 0;
+			dbg.dragging = DRAG_NONE;
 			dbg.captured = 0;
 		}
 	}
@@ -245,6 +319,11 @@ static int pointInRect(double x, double y, int rx, int ry, int rw, int rh) {
 	return (x >= rx && x <= rx + rw && y >= ry && y <= ry + rh);
 }
 
+static int pointInRectPad(double x, double y, int rx, int ry, int rw, int rh, int pad) {
+	return (x >= rx - pad && x <= rx + rw + pad &&
+	        y >= ry - pad && y <= ry + rh + pad);
+}
+
 static void setMaxNFromSlider(double fb_mx) {
 	double t = (fb_mx - dbg.sx) / (double)dbg.sw;
 	if (t < 0.0) t = 0.0;
@@ -255,6 +334,16 @@ static void setMaxNFromSlider(double fb_mx) {
 	if (new_max != dbg.max_n) {
 		dbg.max_n = new_max;
 		dbg.dirty = 1;
+	}
+}
+
+static void setZoomRateFromSlider(double fb_mx) {
+	double t = (fb_mx - dbg.zsx) / (double)dbg.zsw;
+	if (t < 0.0) t = 0.0;
+	if (t > 1.0) t = 1.0;
+	if (t != dbg.zoom_rate_t) {
+		dbg.zoom_rate_t = t;
+		/* Zoom rate doesn't trigger a re-render — just remember it. */
 	}
 }
 
@@ -269,7 +358,7 @@ void debugMouseButtonCallback(GLFWwindow* window, int button, int action, int mo
 
 	if (action == GLFW_RELEASE) {
 		dbg.captured = 0;
-		dbg.dragging = 0;
+		dbg.dragging = DRAG_NONE;
 		return;
 	}
 
@@ -281,21 +370,49 @@ void debugMouseButtonCallback(GLFWwindow* window, int button, int action, int mo
 
 	dbg.captured = 1;
 
-	if (button == GLFW_MOUSE_BUTTON_LEFT) {
-		int margin = 8;
-		if (fb_mx >= dbg.sx && fb_mx <= dbg.sx + dbg.sw &&
-		    fb_my >= dbg.sy - margin && fb_my <= dbg.sy + dbg.sh + margin) {
-			dbg.dragging = 1;
-			setMaxNFromSlider(fb_mx);
-		} else if (pointInRect(fb_mx, fb_my, dbg.bx, dbg.by, dbg.bw, dbg.bh)) {
-			dbg.prec_mode = (dbg.prec_mode + 1) % 3;
-			dbg.dirty = 1;
-		}
+	if (button != GLFW_MOUSE_BUTTON_LEFT) return;
+
+	int margin = 8;
+	if (pointInRectPad(fb_mx, fb_my, dbg.sx, dbg.sy, dbg.sw, dbg.sh, margin)) {
+		dbg.dragging = DRAG_MAX_N;
+		setMaxNFromSlider(fb_mx);
+		return;
+	}
+	if (pointInRectPad(fb_mx, fb_my, dbg.zsx, dbg.zsy, dbg.zsw, dbg.zsh, margin)) {
+		dbg.dragging = DRAG_ZOOM_RATE;
+		setZoomRateFromSlider(fb_mx);
+		return;
+	}
+
+	int spad = 3;
+	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.prec_y + (dbg.line_h - dbg.sq_sz) / 2,
+	                   dbg.sq_sz, dbg.sq_sz, spad)) {
+		dbg.prec_mode = (dbg.prec_mode + 1) % 3;
+		dbg.dirty = 1;
+		return;
+	}
+	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.tex_y + (dbg.line_h - dbg.sq_sz) / 2,
+	                   dbg.sq_sz, dbg.sq_sz, spad)) {
+		dbg.texture_mode = !dbg.texture_mode;
+		dbg.dirty = 1;
+		return;
+	}
+	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.simd_y + (dbg.line_h - dbg.sq_sz) / 2,
+	                   dbg.sq_sz, dbg.sq_sz, spad)) {
+		dbg.simd_mode = !dbg.simd_mode;
+		dbg.dirty = 1;
+		return;
+	}
+	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.hoist_y + (dbg.line_h - dbg.sq_sz) / 2,
+	                   dbg.sq_sz, dbg.sq_sz, spad)) {
+		dbg.hoist_mode = !dbg.hoist_mode;
+		dbg.dirty = 1;
+		return;
 	}
 }
 
 void debugUpdateMouse(GLFWwindow* window, double mouseX, double mouseY) {
-	if (!dbg.visible || !dbg.dragging) return;
+	if (!dbg.visible || dbg.dragging == DRAG_NONE) return;
 
 	int fb_w, fb_h;
 	glfwGetFramebufferSize(window, &fb_w, &fb_h);
@@ -305,7 +422,8 @@ void debugUpdateMouse(GLFWwindow* window, double mouseX, double mouseY) {
 	double fb_mx, fb_my;
 	cursorToFramebuffer(window, mouseX, mouseY, &fb_mx, &fb_my);
 	(void)fb_my;
-	setMaxNFromSlider(fb_mx);
+	if (dbg.dragging == DRAG_MAX_N)     setMaxNFromSlider(fb_mx);
+	if (dbg.dragging == DRAG_ZOOM_RATE) setZoomRateFromSlider(fb_mx);
 }
 
 static void drawQuad(int x, int y, int w, int h) {
@@ -385,6 +503,57 @@ void debugDrawCellGrid(int win_w, int win_h, int rows, int cols) {
 	if (had_depth)  glEnable(GL_DEPTH_TEST);
 }
 
+static void drawSliderTrack(int sx, int sy, int sw, int sh, double t) {
+	int track_y = sy + sh / 2 - 2;
+	glColor4f(0.25f, 0.25f, 0.28f, 0.95f);
+	drawQuad(sx, track_y, sw, 4);
+
+	if (t < 0.0) t = 0.0;
+	if (t > 1.0) t = 1.0;
+	int fill_w = (int)(sw * t);
+
+	glColor4f(0.4f, 0.75f, 1.0f, 0.95f);
+	drawQuad(sx, track_y, fill_w, 4);
+
+	int knob_x = sx + fill_w - KNOB_WIDTH / 2;
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	drawQuad(knob_x, sy - 2, KNOB_WIDTH, sh + 4);
+}
+
+static void drawToggleRow(int row_y, const char* label, int s,
+                          int two_state, int state, char letter) {
+	int line_h = dbg.line_h;
+	int sq_sz = dbg.sq_sz;
+	int sq_x = dbg.sq_x;
+	int sq_y = row_y + (line_h - sq_sz) / 2;
+
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	drawText(dbg.wx + WIDGET_PAD, row_y + (line_h - 8 * s) / 2, label, s);
+
+	/* Square outline. */
+	glColor4f(1.0f, 1.0f, 1.0f, 0.55f);
+	glBegin(GL_LINE_LOOP);
+	glVertex2i(sq_x,         sq_y);
+	glVertex2i(sq_x + sq_sz, sq_y);
+	glVertex2i(sq_x + sq_sz, sq_y + sq_sz);
+	glVertex2i(sq_x,         sq_y + sq_sz);
+	glEnd();
+
+	if (two_state) {
+		if (state) {
+			glColor4f(0.4f, 0.85f, 0.5f, 0.95f);
+			drawQuad(sq_x + 2, sq_y + 2, sq_sz - 4, sq_sz - 4);
+		}
+	} else {
+		/* Tri-state: a centered letter shows which mode is active. */
+		char buf[2] = { letter, 0 };
+		int tx = sq_x + (sq_sz - 8 * s) / 2;
+		int ty = sq_y + (sq_sz - 8 * s) / 2;
+		glColor4f(0.55f, 0.85f, 1.0f, 1.0f);
+		drawText(tx, ty, buf, s);
+	}
+}
+
 void debugRender(int win_w, int win_h) {
 	if (!dbg.visible) return;
 
@@ -414,8 +583,8 @@ void debugRender(int win_w, int win_h) {
 	glColor4f(1.0f, 1.0f, 1.0f, 0.25f);
 	glBegin(GL_LINE_LOOP);
 	glVertex2i(dbg.wx,            dbg.wy);
-	glVertex2i(dbg.wx + dbg.ww,  dbg.wy);
-	glVertex2i(dbg.wx + dbg.ww,  dbg.wy + dbg.wh);
+	glVertex2i(dbg.wx + dbg.ww,   dbg.wy);
+	glVertex2i(dbg.wx + dbg.ww,   dbg.wy + dbg.wh);
 	glVertex2i(dbg.wx,            dbg.wy + dbg.wh);
 	glEnd();
 
@@ -446,42 +615,30 @@ void debugRender(int win_w, int win_h) {
 	snprintf(buf, sizeof(buf), "max_n: %d", dbg.max_n);
 	drawText(tx, ty, buf, s);
 
-	/* Slider track */
-	int track_y = dbg.sy + dbg.sh / 2 - 2;
-	glColor4f(0.25f, 0.25f, 0.28f, 0.95f);
-	drawQuad(dbg.sx, track_y, dbg.sw, 4);
+	double slider_t_maxn = (double)(dbg.max_n - MAX_N_MIN) /
+	                       (double)(MAX_N_MAX - MAX_N_MIN);
+	drawSliderTrack(dbg.sx, dbg.sy, dbg.sw, dbg.sh, slider_t_maxn);
 
-	double t = (double)(dbg.max_n - MAX_N_MIN) / (double)(MAX_N_MAX - MAX_N_MIN);
-	if (t < 0.0) t = 0.0;
-	if (t > 1.0) t = 1.0;
-	int fill_w = (int)(dbg.sw * t);
+	long double zr = zoomRateFromT(dbg.zoom_rate_t);
+	snprintf(buf, sizeof(buf), "zoom rate: %.2Lfx/s", zr);
+	drawText(tx, dbg.zr_label_y, buf, s);
+	drawSliderTrack(dbg.zsx, dbg.zsy, dbg.zsw, dbg.zsh, dbg.zoom_rate_t);
 
-	glColor4f(0.4f, 0.75f, 1.0f, 0.95f);
-	drawQuad(dbg.sx, track_y, fill_w, 4);
-
-	int knob_x = dbg.sx + fill_w - KNOB_WIDTH / 2;
-	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-	drawQuad(knob_x, dbg.sy - 2, KNOB_WIDTH, dbg.sh + 4);
-
-	/* Precision toggle button — click to cycle auto / double / long double. */
-	glColor4f(0.15f, 0.18f, 0.22f, 0.95f);
-	drawQuad(dbg.bx, dbg.by, dbg.bw, dbg.bh);
-	glColor4f(1.0f, 1.0f, 1.0f, 0.4f);
-	glBegin(GL_LINE_LOOP);
-	glVertex2i(dbg.bx,           dbg.by);
-	glVertex2i(dbg.bx + dbg.bw,  dbg.by);
-	glVertex2i(dbg.bx + dbg.bw,  dbg.by + dbg.bh);
-	glVertex2i(dbg.bx,           dbg.by + dbg.bh);
-	glEnd();
-
-	const char* prec_label;
-	switch (dbg.prec_mode) {
-		case 1:  prec_label = "prec: double";  break;
-		case 2:  prec_label = "prec: ldouble"; break;
-		default: prec_label = "prec: auto";    break;
+	long double z = dbg.current_zoom;
+	long double abs_z = z < 0 ? -z : z;
+	if (abs_z >= 1e-3L && abs_z < 1e3L) {
+		snprintf(buf, sizeof(buf), "zoom: %.3Lf", z);
+	} else {
+		snprintf(buf, sizeof(buf), "zoom: %.3Le", z);
 	}
-	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-	drawText(dbg.bx + 6, dbg.by + (dbg.bh - 8 * s) / 2, prec_label, s);
+	drawText(tx, dbg.zoom_value_y, buf, s);
+
+	char prec_letter = (dbg.prec_mode == 1) ? 'D' :
+	                   (dbg.prec_mode == 2) ? 'L' : 'A';
+	drawToggleRow(dbg.prec_y,  "prec",            s, 0, dbg.prec_mode, prec_letter);
+	drawToggleRow(dbg.tex_y,   "texture upload",  s, 1, dbg.texture_mode, 0);
+	drawToggleRow(dbg.simd_y,  "SIMD",            s, 1, dbg.simd_mode,    0);
+	drawToggleRow(dbg.hoist_y, "hoist args",      s, 1, dbg.hoist_mode,   0);
 
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 

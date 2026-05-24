@@ -1,5 +1,5 @@
 CC=gcc
-COPTIONS=-Wall -Wextra -g -O3
+COPTIONS=-Wall -Wextra -g -O3 -mavx2 -mfma
 PKGS=glfw3 glew gl
 CFLAGS=$(COPTIONS) $(shell pkg-config --cflags $(PKGS))
 LDFLAGS=$(shell pkg-config --libs $(PKGS)) -lpthread -lm

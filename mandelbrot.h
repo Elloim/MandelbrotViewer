@@ -24,6 +24,13 @@ void * createThread(void * args);
 void updateCellsTab(int relX, int relY);
 void movePixelData(unsigned char * data, int relX, int relY);
 
+/* Multi-threaded movePixelData. Below an internal byte threshold (small pans)
+ * the function falls back to the single-threaded path because pthread launch
+ * overhead would dwarf the copy. For large pans uses a temp staging buffer
+ * (allocated once, grown on demand) to avoid the source/dest overlap race
+ * inherent in row-parallel in-place shifting. */
+void movePixelDataParallel(unsigned char * data, int relX, int relY, int n_threads);
+
 /* Shared state — defined in main.c */
 extern int width;
 extern int height;
@@ -40,5 +47,15 @@ extern int cell_pixel_height;
 
 /* 0 = auto (xscale threshold), 1 = force double, 2 = force long double. */
 extern int prec_force_mode;
+
+/* 1 = hoist xmin/ymin/xscale/yscale into worker locals (compiler can keep
+ * them in registers); 0 = re-dereference the pointers inside the inner
+ * loop on every pixel. The deref path exists for the debug-widget toggle. */
+extern int hoist_mode;
+
+/* 1 = use AVX2 SIMD kernel for the double-precision inner loop (4 pixels
+ * per row at a time); 0 = scalar inner loop. Has no effect when the long-
+ * double path is active (long double has no SIMD path). */
+extern int simd_mode;
 
 #endif
