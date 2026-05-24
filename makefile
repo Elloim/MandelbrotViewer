@@ -3,7 +3,7 @@ COPTIONS=-Wall -Wextra -g -O3
 PKGS=glfw3 glew gl
 CFLAGS=$(COPTIONS) $(shell pkg-config --cflags $(PKGS))
 LDFLAGS=$(shell pkg-config --libs $(PKGS)) -lpthread -lm
-OBJECTS=main.o mandelbrot.o
+OBJECTS=main.o mandelbrot.o debug.o
 
 prog: $(OBJECTS) makefile
 	$(CC) $(OBJECTS) -o main $(LDFLAGS)
@@ -11,8 +11,11 @@ prog: $(OBJECTS) makefile
 mandelbrot.o: mandelbrot.c mandelbrot.h makefile
 	$(CC) $(CFLAGS) mandelbrot.c -c
 
-main.o: main.c main.h mandelbrot.h makefile
+main.o: main.c main.h mandelbrot.h debug.h makefile
 	$(CC) $(CFLAGS) main.c -c
+
+debug.o: debug.c debug.h makefile
+	$(CC) $(CFLAGS) debug.c -c
 
 clean:
 	rm -f *.o main

@@ -16,6 +16,7 @@
 
 #include "main.h"
 #include "mandelbrot.h"
+#include "debug.h"
 
 int width = 2100;
 int height = 1500;
@@ -167,7 +168,11 @@ int main(int argc, char** argv) {
 
 	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 	glfwSetErrorCallback(error_callback);
+	glfwSetKeyCallback(window, debugKeyCallback);
+	glfwSetMouseButtonCallback(window, debugMouseButtonCallback);
 	glfwSwapInterval(0);
+
+	debugInit(max_n);
 
 	/* Use actual framebuffer size — may differ from requested on HiDPI/Wayland. */
 	glfwGetFramebufferSize(window, &width, &height);
@@ -272,8 +277,17 @@ int main(int argc, char** argv) {
 
 		glClear(GL_COLOR_BUFFER_BIT);
 
-		moveAround(window, data, &xmin, &xmax, &ymin, &ymax,
-		           xscale, yscale, prevmouseX, prevmouseY, mouseX, mouseY);
+		debugUpdateMouse(window, mouseX, mouseY);
+		if (debugConsumeDirty()) {
+			int new_max_n = debugGetMaxN();
+			for (int i = 0; i < num_threads; i++) arguments[i].max_n = new_max_n;
+			markAllCellsDirty();
+		}
+
+		if (!debugCapturesMouse()) {
+			moveAround(window, data, &xmin, &xmax, &ymin, &ymax,
+			           xscale, yscale, prevmouseX, prevmouseY, mouseX, mouseY);
+		}
 
 		xscale = (xmax - xmin) / width;
 		yscale = (ymax - ymin) / height;
@@ -281,6 +295,7 @@ int main(int argc, char** argv) {
 		cell_pixel_width = width / cell_number_col;
 		cell_pixel_height = height / cell_number_row;
 
+		double thread_wait_ms = 0.0;
 		if (nb_cells_to_update > 0) {
 			int created = 0;
 			for (int i = 0; i < num_threads; i++) {
@@ -292,15 +307,20 @@ int main(int argc, char** argv) {
 				}
 				created++;
 			}
+			double t0 = glfwGetTime();
 			for (int i = 0; i < created; i++) pthread_join(threads[i], NULL);
+			thread_wait_ms = (glfwGetTime() - t0) * 1000.0;
 			global_count = 0;
 			nb_cells_to_update = 0;
 			if (exit_code != 0) break;
 		}
+		debugRecordThreadWait(thread_wait_ms);
 
 		glDrawPixels(width, height, GL_RGB, GL_FLOAT, data);
+		debugRender(width, height);
 		glfwSwapBuffers(window);
 		glfwPollEvents();
+		debugTick(glfwGetTime());
 		printMsPerFrame(&LastTime, &nbFrames);
 	}
 
