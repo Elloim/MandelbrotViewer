@@ -8,8 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <complex.h>
-#include <unistd.h>
 #include <pthread.h>
 
 #define GLFW_INCLUDE_NONE
@@ -32,16 +30,16 @@ int gradient_points[][3] = {
 		{249,  129, 37},
 		{207,   137, 242},
 		{255,  77,  196},
-		{101,  218,  12},	
+		{101,  218,  12},
 		{213, 174, 143},
-		{67, 157, 236},	
+		{67, 157, 236},
 		{173, 103,  242},
 		{201, 14,    14},
 		{206, 101,    101},
 		{160,  111,  235}
 };
 
-int * cells_to_update;
+int * cells_to_update = NULL;
 int nb_cells_to_update = 0;
 
 int global_count = 0;
@@ -62,49 +60,65 @@ void printMsPerFrame(double* LastTime, int* nbFrames) {
 	(*nbFrames)++;
 
 	if (current - *LastTime >= 1.0) {
-		printf("%f ms/frame | %d FPS\n", 1000.0/(double)(*nbFrames), *nbFrames);
+		printf("%f ms/frame | %d FPS\n", 1000.0 / (double)(*nbFrames), *nbFrames);
 		*nbFrames = 0;
 		*LastTime = glfwGetTime();
 	}
 }
 
-void moveAround(GLFWwindow* window, float * data, long double* xmin, long double* xmax, long double* ymin, long double *ymax, long double xscale, long double yscale, double prevmouseX, double prevmouseY, double mouseX, double mouseY) {
+static void markAllCellsDirty(void) {
+	for (int i = 0; i < cell_number; i++) cells_to_update[i] = i;
+	nb_cells_to_update = cell_number;
+}
+
+void moveAround(GLFWwindow* window, float * data,
+                long double* xmin, long double* xmax,
+                long double* ymin, long double* ymax,
+                long double xscale, long double yscale,
+                double prevmouseX, double prevmouseY,
+                double mouseX, double mouseY) {
 
 	if (glfwGetMouseButton(window, 0)) {
+		int dx = (int)(prevmouseX - mouseX);
+		int dy = (int)(mouseY - prevmouseY);
+		if (dx == 0 && dy == 0) return;
+
 		long double offsetX = (prevmouseX - mouseX) * xscale;
 		long double offsetY = -(prevmouseY - mouseY) * yscale;
-		*xmin += offsetX; 
+		*xmin += offsetX;
 		*xmax += offsetX;
 		*ymin += offsetY;
 		*ymax += offsetY;
-		updateCellsTab((int)prevmouseX - mouseX, (int)-(prevmouseY - mouseY));	
-		movePixelData(data, prevmouseX - mouseX, mouseY - prevmouseY);
+
+		/* If the pan exceeds the window, existing pixels can't be reused. */
+		if (abs(dx) >= width || abs(dy) >= height) {
+			markAllCellsDirty();
+		} else {
+			updateCellsTab(dx, dy);
+			movePixelData(data, dx, dy);
+		}
+		return;
 	}
 
 	if (glfwGetMouseButton(window, 1)) {
 		long double xlength = (*xmax - *xmin) / 10;
 		long double ylength = (*ymax - *ymin) / 10;
-		*xmin += -xlength;
+		*xmin -= xlength;
 		*xmax += xlength;
-		*ymin += -ylength;
+		*ymin -= ylength;
 		*ymax += ylength;
-		for (int i = 0; i < cell_number; i++) {
-			cells_to_update[i] = i;
-		}
-		nb_cells_to_update = cell_number;
+		markAllCellsDirty();
+		return;
 	}
 
 	if (glfwGetMouseButton(window, 2)) {
 		long double xlength = (*xmax - *xmin) / 10;
 		long double ylength = (*ymax - *ymin) / 10;
 		*xmin += xlength;
-		*xmax += -xlength;
+		*xmax -= xlength;
 		*ymin += ylength;
-		*ymax += -ylength;
-		for (int i = 0; i < cell_number; i++) {
-			cells_to_update[i] = i;
-		}
-		nb_cells_to_update = cell_number;
+		*ymax -= ylength;
+		markAllCellsDirty();
 	}
 }
 
@@ -114,88 +128,80 @@ int main(int argc, char** argv) {
 	int max_n = 500;
 
 	for (int arg = 1; arg < argc; arg++) {
-		if (!strncmp("-w", argv[arg], 2)) {
+		if (!strncmp("-w", argv[arg], 2) && arg + 1 < argc) {
 			width = (int) strtol(argv[arg+1], NULL, 10);
 		}
-		else if (!strncmp("-h", argv[arg], 2)) {
+		else if (!strncmp("-h", argv[arg], 2) && arg + 1 < argc) {
 			height = (int) strtol(argv[arg+1], NULL, 10);
 		}
-		else if (!strncmp("-max", argv[arg], 4)) {
+		else if (!strncmp("-max", argv[arg], 4) && arg + 1 < argc) {
 			max_n = (int) strtol(argv[arg+1], NULL, 10);
 		}
 	}
 
-
-	GLFWwindow* window;
-
 	if (!glfwInit()) {
-		printf("Erreur initialisation\n");
+		fprintf(stderr, "Erreur initialisation\n");
 		return -1;
 	}
 
-	window = glfwCreateWindow(width, height, "Mandelbrot", NULL, NULL);
+	GLFWwindow* window = glfwCreateWindow(width, height, "Mandelbrot", NULL, NULL);
 
 	if (!window) {
-		printf("Erreur creation contexte\n");
+		fprintf(stderr, "Erreur creation contexte\n");
+		glfwTerminate();
 		return -1;
-
 	}
 
 	glfwMakeContextCurrent(window);
 
 	glewExperimental = GL_TRUE;
 	GLenum err = glewInit();
-	/* GLEW_ERROR_NO_GLX_DISPLAY (4 in GLEW 2.2) is expected on Wayland/EGL —
-	 * GLEW can't query GLX because there is no X display. Extensions still load. */
+	/* GLEW_ERROR_NO_GLX_DISPLAY is expected on Wayland/EGL — there is no GLX. */
 	if (GLEW_OK != err && err != GLEW_ERROR_NO_GLX_DISPLAY) {
 		fprintf(stderr, "Error: %s (code %d)\n", glewGetErrorString(err), err);
 		glfwDestroyWindow(window);
 		glfwTerminate();
 		return -1;
 	}
-	glGetError(); /* clear any spurious error from glewInit on EGL */
-
-	//glEnable(GL_FRAMEBUFFER_SRGB);
+	glGetError();
 
 	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 	glfwSetErrorCallback(error_callback);
-
 	glfwSwapInterval(0);
 
+	/* Use actual framebuffer size — may differ from requested on HiDPI/Wayland. */
+	glfwGetFramebufferSize(window, &width, &height);
 
-	float * data = (float*) malloc(sizeof(float) * width * height * 3);
-
-	int count = 0;
-	for (int i = 0; i < height; i++) {
-		for (int j = 0; j < width; j++) {
-			data[count] = 1.;
-			data[count+1] = 0.;
-			data[count+2] = 0.;
-			count += 3;
-		}
+	float * data = (float*) calloc((size_t)width * height * 3, sizeof(float));
+	if (!data) {
+		fprintf(stderr, "Failed to allocate pixel buffer\n");
+		glfwDestroyWindow(window);
+		glfwTerminate();
+		return -1;
 	}
 
 	long double xmin = -2;
 	long double xmax = 1;
-	long double ymax = (height/(long double)width) * (xmax - xmin)/2;
-	long double ymin = - ymax;
+	long double ymax = (height / (long double)width) * (xmax - xmin) / 2;
+	long double ymin = -ymax;
 
 	long double xscale = (xmax - xmin) / width;
 	long double yscale = (ymax - ymin) / height;
 
-	float ** gradient;
+	float * gradient = NULL;
 	int nb_cols = 10;
 	int interp_size = 256;
-	int size_grad = (nb_cols-1) * interp_size;
+	int size_grad = (nb_cols - 1) * interp_size;
 	gradientInterpol(gradient_points, &gradient, nb_cols, interp_size);
 
-	double LastTime = glfwGetTime();
-	int nbFrames = 0;
-	double mouseX = 0;
-	double mouseY = 0;
-	double prevmouseX = 0;
-	double prevmouseY = 0;
-	glRasterPos2i(-1, -1);
+	cell_number_row = 100;
+	cell_number_col = 100;
+	cell_number = cell_number_row * cell_number_col;
+	cells_to_update = (int *) malloc(cell_number * sizeof(int));
+	markAllCellsDirty();
+
+	cell_pixel_width = width / cell_number_col;
+	cell_pixel_height = height / cell_number_row;
 
 	int num_threads = 16;
 	pthread_t threads[num_threads];
@@ -212,19 +218,17 @@ int main(int argc, char** argv) {
 		arguments[i].ymin = &ymin;
 	}
 
-	cell_number_row = 100;
-	cell_number_col = 100;
-	cell_number = cell_number_row * cell_number_col;
+	double LastTime = glfwGetTime();
+	int nbFrames = 0;
+	double mouseX = 0, mouseY = 0;
+	double prevmouseX = 0, prevmouseY = 0;
 
-	cells_to_update = (int *) malloc(cell_number * sizeof(int));
+	int prev_width = width;
+	int prev_height = height;
 
-	for (int i = 0; i < cell_number; i++) {
-		cells_to_update[i] = i;
-	}
-	nb_cells_to_update = cell_number;
+	glRasterPos2i(-1, -1);
 
-	cell_pixel_width = width / cell_number_col;
-	cell_pixel_height = height / cell_number_row;
+	int exit_code = 0;
 
 	while (!glfwWindowShouldClose(window)) {
 
@@ -232,30 +236,67 @@ int main(int argc, char** argv) {
 		prevmouseY = mouseY;
 		glfwGetFramebufferSize(window, &width, &height);
 		glfwGetCursorPos(window, &mouseX, &mouseY);
+
+		if (width <= 0 || height <= 0) {
+			/* Window minimized — block until something happens. */
+			glfwWaitEventsTimeout(0.1);
+			continue;
+		}
+
+		if (width != prev_width || height != prev_height) {
+			float * new_data = (float*) realloc(data, (size_t)width * height * 3 * sizeof(float));
+			if (!new_data) {
+				fprintf(stderr, "Failed to realloc pixel buffer on resize\n");
+				exit_code = -1;
+				break;
+			}
+			data = new_data;
+			for (int i = 0; i < num_threads; i++) arguments[i].data = data;
+        /* Preserve per-pixel scale and the view center: resizing the window
+         * reveals more (or hides some) of the fractal at the same zoom. */
+            long double scale = (xmax - xmin) / prev_width;
+			long double xcenter = (xmin + xmax) / 2;
+			long double ycenter = (ymin + ymax) / 2;
+            xmin = xcenter - scale * width  / 2;
+            xmax = xcenter + scale * width  / 2;
+            ymin = ycenter - scale * height / 2;
+            ymax = ycenter + scale * height / 2;
+
+			glViewport(0, 0, width, height);
+			glRasterPos2i(-1, -1);
+
+			markAllCellsDirty();
+			prev_width = width;
+			prev_height = height;
+		}
+
 		glClear(GL_COLOR_BUFFER_BIT);
 
-		moveAround(window, data, &xmin, &xmax, &ymin, &ymax, xscale, yscale, prevmouseX, prevmouseY, mouseX, mouseY);
+		moveAround(window, data, &xmin, &xmax, &ymin, &ymax,
+		           xscale, yscale, prevmouseX, prevmouseY, mouseX, mouseY);
 
-		xscale = (xmax - xmin) / (width);
-		yscale = (ymax - ymin) / (height);
+		xscale = (xmax - xmin) / width;
+		yscale = (ymax - ymin) / height;
 
 		cell_pixel_width = width / cell_number_col;
 		cell_pixel_height = height / cell_number_row;
 
-		for (int i = 0; i < num_threads; i++) {	
-
-			int rc = pthread_create(&threads[i], NULL, createThread, (void*)&arguments[i]);
-
-			if (rc) {
-				fprintf(stderr, "Erreur initialisation thread : %d\n", i);
-				return -1;
+		if (nb_cells_to_update > 0) {
+			int created = 0;
+			for (int i = 0; i < num_threads; i++) {
+				int rc = pthread_create(&threads[i], NULL, createThread, (void*)&arguments[i]);
+				if (rc) {
+					fprintf(stderr, "Erreur initialisation thread : %d\n", i);
+					exit_code = -1;
+					break;
+				}
+				created++;
 			}
+			for (int i = 0; i < created; i++) pthread_join(threads[i], NULL);
+			global_count = 0;
+			nb_cells_to_update = 0;
+			if (exit_code != 0) break;
 		}
-
-		for (int i = 0; i < num_threads; i++) {
-			pthread_join(threads[i], NULL);
-		}
-		global_count = 0;
 
 		glDrawPixels(width, height, GL_RGB, GL_FLOAT, data);
 		glfwSwapBuffers(window);
@@ -263,8 +304,11 @@ int main(int argc, char** argv) {
 		printMsPerFrame(&LastTime, &nbFrames);
 	}
 
+	free(data);
+	free(gradient);
+	free(cells_to_update);
+	pthread_mutex_destroy(&global_count_mutex);
 	glfwDestroyWindow(window);
 	glfwTerminate();
-	return 0;
-};
-
+	return exit_code;
+}
