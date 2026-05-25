@@ -27,7 +27,7 @@ typedef struct args_t {
 #define CELL_STATE_BORDER_SKIPPED  2
 
 /* Public API */
-void gradientInterpol(int points[][3], unsigned char ** gradient, int nb_points, int nb_gradients);
+void gradientInterpol(const int points[][3], unsigned char ** gradient, int nb_points, int nb_gradients);
 void * createThread(void * args);
 void updateCellsTab(int pan_dx, int pan_dy);
 void movePixelData(unsigned char * data, int pan_dx, int pan_dy);

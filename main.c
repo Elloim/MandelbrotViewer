@@ -18,28 +18,10 @@
 #include "main.h"
 #include "mandelbrot.h"
 #include "debug.h"
+#include "color_editor.h"
 
 int width = 2100;
 int height = 1500;
-
-int gradient_points[][3] = {
-		{246,  8,    8},
-		{241, 233, 191},
-		{5,  221,    245},
-		{33,   89,  220},
-		{2,  110,   16},
-		{209,   246,  26},
-		{249,  129, 37},
-		{207,   137, 242},
-		{255,  77,  196},
-		{101,  218,  12},
-		{213, 174, 143},
-		{67, 157, 236},
-		{173, 103,  242},
-		{201, 14,    14},
-		{206, 101,    101},
-		{160,  111,  235}
-};
 
 int * cells_to_update = NULL;
 int nb_cells_to_update = 0;
@@ -201,6 +183,16 @@ void mainKeyCallback(GLFWwindow* window, int key, int scancode, int action, int 
 		if (key == GLFW_KEY_R) redo_pending = 1;
 	}
 	debugKeyCallback(window, key, scancode, action, mods);
+	colorEditorKeyCallback(window, key, scancode, action, mods);
+}
+
+/* Fan out to all widget mouse-button handlers — GLFW only allows one
+ * callback per event type, so this is where dispatch happens. Each widget
+ * only captures clicks that land in its own rect, so the order between
+ * the two doesn't matter for non-overlapping widgets. */
+static void mainMouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
+	debugMouseButtonCallback(window, button, action, mods);
+	colorEditorMouseButtonCallback(window, button, action, mods);
 }
 
 
@@ -469,7 +461,7 @@ int main(int argc, char** argv) {
 	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 	glfwSetErrorCallback(error_callback);
 	glfwSetKeyCallback(window, mainKeyCallback);
-	glfwSetMouseButtonCallback(window, debugMouseButtonCallback);
+	glfwSetMouseButtonCallback(window, mainMouseButtonCallback);
 	glfwSwapInterval(0);
 
 	/* RGB8 rows aren't always 4-byte aligned (e.g. odd width); default GL
@@ -477,6 +469,7 @@ int main(int argc, char** argv) {
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
 	debugInit(max_n);
+	colorEditorInit();
 
 	/* Use actual framebuffer size — may differ from requested on HiDPI/Wayland. */
 	glfwGetFramebufferSize(window, &width, &height);
@@ -512,10 +505,10 @@ int main(int argc, char** argv) {
 	default_view = (view_t){ xmin, xmax, ymin, ymax };
 
 	unsigned char * gradient = NULL;
-	int nb_cols = 10;
 	int interp_size = 256;
-	int size_grad = (nb_cols - 1) * interp_size;
-	gradientInterpol(gradient_points, &gradient, nb_cols, interp_size);
+	int n_stops = colorEditorNumStops();
+	int size_grad = (n_stops - 1) * interp_size;
+	gradientInterpol(colorEditorStops(), &gradient, n_stops, interp_size);
 
 	cell_number_row = 80;
 	cell_number_col = 80;
@@ -531,7 +524,7 @@ int main(int argc, char** argv) {
 	cell_pixel_width = width / cell_number_col;
 	cell_pixel_height = height / cell_number_row;
 
-	int num_threads = 16;
+	int num_threads = 8;
 	pthread_t threads[num_threads];
 	args_t arguments[num_threads];
 
@@ -613,6 +606,7 @@ int main(int argc, char** argv) {
 		glClear(GL_COLOR_BUFFER_BIT);
 
 		debugUpdateMouse(window, mouseX, mouseY);
+		colorEditorUpdateMouse(window, mouseX, mouseY);
 		prec_force_mode = debugGetPrecMode();
 		simd_mode       = debugGetSimdMode();
 		move_par_mode   = debugGetMoveParallelMode();
@@ -621,6 +615,21 @@ int main(int argc, char** argv) {
 		if (debugConsumeDirty()) {
 			int new_max_iter = debugGetMaxN();
 			for (int i = 0; i < num_threads; i++) arguments[i].max_iter = new_max_iter;
+			markAllCellsDirty();
+		}
+		if (colorEditorConsumeDirty()) {
+			/* Palette changed — regenerate the interpolated gradient and
+			 * point every thread arg at the new buffer. n_stops can grow
+			 * or shrink, so size_grad must be recomputed too. */
+			free(gradient);
+			gradient = NULL;
+			n_stops = colorEditorNumStops();
+			size_grad = (n_stops - 1) * interp_size;
+			gradientInterpol(colorEditorStops(), &gradient, n_stops, interp_size);
+			for (int i = 0; i < num_threads; i++) {
+				arguments[i].gradient = gradient;
+				arguments[i].gradient_size = size_grad;
+			}
 			markAllCellsDirty();
 		}
 
@@ -656,7 +665,7 @@ int main(int argc, char** argv) {
 		/* Gesture-edge detection: each contiguous nav gesture (mouse pan /
 		 * zoom, key zoom, arrow pan) records one history entry — the view at
 		 * the moment the gesture started — when the user lets go. */
-		int nav_active = !debugCapturesMouse() && (
+		int nav_active = !debugCapturesMouse() && !colorEditorCapturesMouse() && (
 			glfwGetMouseButton(window, 0) ||
 			glfwGetMouseButton(window, 1) ||
 			glfwGetMouseButton(window, 2) ||
@@ -674,7 +683,7 @@ int main(int argc, char** argv) {
 		}
 		nav_active_prev = nav_active;
 
-		if (!debugCapturesMouse()) {
+		if (!debugCapturesMouse() && !colorEditorCapturesMouse()) {
 			moveAround(window, data, &xmin, &xmax, &ymin, &ymax,
 			           xscale, yscale, prevmouseX, prevmouseY, mouseX, mouseY, dt);
 		}
@@ -721,6 +730,7 @@ int main(int argc, char** argv) {
 		debugDrawCellGrid(width, height, cell_number_row, cell_number_col);
 		drawSelectionOverlay(width, height);
 		debugRender(width, height);
+		colorEditorRender(width, height);
 		glfwSwapBuffers(window);
 		glfwPollEvents();
 		debugTick(glfwGetTime());

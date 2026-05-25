@@ -52,7 +52,7 @@
 
 /* ---------- Gradient construction ------------------------------------ */
 
-void gradientInterpol(int points[][3], unsigned char ** gradient,
+void gradientInterpol(const int points[][3], unsigned char ** gradient,
                       int nb_points, int nb_gradients) {
 	int total = (nb_points - 1) * nb_gradients;
 	*gradient = (unsigned char *) malloc((size_t)total * 3);
