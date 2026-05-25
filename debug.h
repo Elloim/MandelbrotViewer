@@ -24,9 +24,6 @@ int  debugGetTextureMode(void);
 /* 0=scalar inner loop, 1=AVX2 SIMD inner loop. */
 int  debugGetSimdMode(void);
 
-/* 0=pointer-deref args inside hot loop, 1=hoisted by-value args. */
-int  debugGetHoistMode(void);
-
 /* 0=single-threaded movePixelData, 1=multi-threaded staging-buffer version.
  * Off by default — has been known to produce visible artifacts. */
 int  debugGetMoveParallelMode(void);

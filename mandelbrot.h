@@ -8,14 +8,14 @@
 #define mandelbrot_h
 
 typedef struct args_t {
-	unsigned char * gradient;   /* flat RGB triplets, size_grad * 3 bytes */
+	unsigned char * gradient;   /* flat RGB triplets, gradient_size * 3 bytes */
 	unsigned char * data;       /* framebuffer, width*height*3 bytes (RGB8) */
 	long double * xscale;
 	long double * yscale;
 	long double * xmin;
 	long double * ymin;
-	int size_grad;
-	int max_n;
+	int gradient_size;
+	int max_iter;
 } args_t;
 
 /* Per-cell state set by workers each frame. Read by the debug overlay to
@@ -29,15 +29,15 @@ typedef struct args_t {
 /* Public API */
 void gradientInterpol(int points[][3], unsigned char ** gradient, int nb_points, int nb_gradients);
 void * createThread(void * args);
-void updateCellsTab(int relX, int relY);
-void movePixelData(unsigned char * data, int relX, int relY);
+void updateCellsTab(int pan_dx, int pan_dy);
+void movePixelData(unsigned char * data, int pan_dx, int pan_dy);
 
 /* Multi-threaded movePixelData. Two-phase data→temp→data with a lazy-grown
  * staging buffer; below the internal byte threshold (small pans) it falls
  * back to the single-threaded path because pthread launch overhead would
  * dwarf the copy. Disabled by default — see the parallel-move toggle.
  * Has caused visible buffer artifacts in past testing, hence opt-in only. */
-void movePixelDataParallel(unsigned char * data, int relX, int relY, int n_threads);
+void movePixelDataParallel(unsigned char * data, int pan_dx, int pan_dy, int n_threads);
 
 /* Shared state — defined in main.c */
 extern int width;
@@ -60,20 +60,15 @@ extern int cell_pixel_height;
 /* 0 = auto (xscale threshold), 1 = force double, 2 = force long double. */
 extern int prec_force_mode;
 
-/* 1 = hoist xmin/ymin/xscale/yscale into worker locals (compiler can keep
- * them in registers); 0 = re-dereference the pointers inside the inner
- * loop on every pixel. The deref path exists for the debug-widget toggle. */
-extern int hoist_mode;
-
 /* 1 = use AVX2 SIMD kernel for the double-precision inner loop (4 pixels
  * per row at a time); 0 = scalar inner loop. Has no effect when the long-
  * double path is active (long double has no SIMD path). */
 extern int simd_mode;
 
 /* 1 = compute each cell's perimeter first; if every border pixel reached
- * max_n, fill the interior with black (the set is connected, so an all-
- * max_n border implies an all-max_n interior) and mark CELL_STATE_BORDER_
- * SKIPPED. 0 = always compute every pixel. */
+ * max_iter, fill the interior with black (the set is connected, so an all-
+ * max_iter border implies an all-max_iter interior) and mark CELL_STATE_
+ * BORDER_SKIPPED. 0 = always compute every pixel. */
 extern int border_opt_mode;
 
 #endif

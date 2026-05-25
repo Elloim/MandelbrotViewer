@@ -143,7 +143,6 @@ static struct {
 	int prec_mode;        /* 0=auto, 1=force double, 2=force long double  */
 	int texture_mode;     /* 0=glDrawPixels, 1=textured quad              */
 	int simd_mode;        /* 0=scalar, 1=AVX2                             */
-	int hoist_mode;       /* 0=pointer-deref args, 1=hoisted-by-value     */
 	int move_par_mode;    /* 0=single-threaded move, 1=parallel           */
 	int show_cells_mode;  /* 0=hide cell grid overlay, 1=show             */
 	int border_opt_mode;  /* 0=disable border fast path, 1=enable         */
@@ -184,7 +183,6 @@ static struct {
 	int prec_y;
 	int tex_y;
 	int simd_y;
-	int hoist_y;
 	int move_par_y;
 	int cells_y;
 	int border_opt_y;
@@ -252,7 +250,6 @@ static void recomputeLayout(int fb_h) {
 	dbg.prec_y    = y; y += dbg.line_h;
 	dbg.tex_y     = y; y += dbg.line_h;
 	dbg.simd_y    = y; y += dbg.line_h;
-	dbg.hoist_y   = y; y += dbg.line_h;
 	dbg.move_par_y  = y; y += dbg.line_h;
 	dbg.cells_y     = y; y += dbg.line_h;
 	dbg.border_opt_y = y; y += dbg.line_h;
@@ -269,7 +266,6 @@ void debugInit(int initial_max_n) {
 	dbg.zoom_rate_t = tFromZoomRate(4.0L);
 	dbg.texture_mode    = 1;    /* optimized defaults                       */
 	dbg.simd_mode       = 1;
-	dbg.hoist_mode      = 1;
 	dbg.move_par_mode   = 0;    /* off — parallel move had artifacts        */
 	dbg.show_cells_mode = 1;    /* preserves prior always-on behavior       */
 	dbg.border_opt_mode = 1;    /* perimeter-skip is pure win when it fires */
@@ -283,7 +279,6 @@ int debugGetMaxN(void)               { return dbg.max_n; }
 int debugGetPrecMode(void)           { return dbg.prec_mode; }
 int debugGetTextureMode(void)        { return dbg.texture_mode; }
 int debugGetSimdMode(void)           { return dbg.simd_mode; }
-int debugGetHoistMode(void)          { return dbg.hoist_mode; }
 int debugGetMoveParallelMode(void)   { return dbg.move_par_mode; }
 int debugGetShowCells(void)          { return dbg.show_cells_mode; }
 int debugGetBorderOptMode(void)      { return dbg.border_opt_mode; }
@@ -421,12 +416,6 @@ void debugMouseButtonCallback(GLFWwindow* window, int button, int action, int mo
 	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.simd_y + (dbg.line_h - dbg.sq_sz) / 2,
 	                   dbg.sq_sz, dbg.sq_sz, spad)) {
 		dbg.simd_mode = !dbg.simd_mode;
-		dbg.dirty = 1;
-		return;
-	}
-	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.hoist_y + (dbg.line_h - dbg.sq_sz) / 2,
-	                   dbg.sq_sz, dbg.sq_sz, spad)) {
-		dbg.hoist_mode = !dbg.hoist_mode;
 		dbg.dirty = 1;
 		return;
 	}
@@ -747,7 +736,6 @@ void debugRender(int win_w, int win_h) {
 	drawToggleRow(dbg.prec_y,     "prec",            s, 0, dbg.prec_mode, prec_letter);
 	drawToggleRow(dbg.tex_y,      "texture upload",  s, 1, dbg.texture_mode,   0);
 	drawToggleRow(dbg.simd_y,     "SIMD",            s, 1, dbg.simd_mode,      0);
-	drawToggleRow(dbg.hoist_y,    "hoist args",      s, 1, dbg.hoist_mode,     0);
 	drawToggleRow(dbg.move_par_y,  "parallel move",   s, 1, dbg.move_par_mode,   0);
 	drawToggleRow(dbg.cells_y,     "show cells",      s, 1, dbg.show_cells_mode, 0);
 	drawToggleRow(dbg.border_opt_y, "border opt",     s, 1, dbg.border_opt_mode, 0);

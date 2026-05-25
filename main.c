@@ -54,7 +54,6 @@ int cell_pixel_width = 0;
 int cell_pixel_height = 0;
 
 int prec_force_mode = 0;   /* updated each frame from debugGetPrecMode() */
-int hoist_mode      = 1;   /* updated each frame from debugGetHoistMode() */
 int simd_mode       = 1;   /* updated each frame from debugGetSimdMode() */
 int border_opt_mode = 1;   /* updated each frame from debugGetBorderOptMode() */
 
@@ -518,8 +517,8 @@ int main(int argc, char** argv) {
 	int size_grad = (nb_cols - 1) * interp_size;
 	gradientInterpol(gradient_points, &gradient, nb_cols, interp_size);
 
-	cell_number_row = 100;
-	cell_number_col = 100;
+	cell_number_row = 80;
+	cell_number_col = 80;
 	cell_number = cell_number_row * cell_number_col;
 	cells_to_update = (int *) malloc(cell_number * sizeof(int));
 	cell_state      = (int *) calloc((size_t)cell_number, sizeof(int));
@@ -539,8 +538,8 @@ int main(int argc, char** argv) {
 	for (int i = 0; i < num_threads; i++) {
 		arguments[i].gradient = gradient;
 		arguments[i].data = data;
-		arguments[i].size_grad = size_grad;
-		arguments[i].max_n = max_n;
+		arguments[i].gradient_size = size_grad;
+		arguments[i].max_iter = max_n;
 		arguments[i].xscale = &xscale;
 		arguments[i].yscale = &yscale;
 		arguments[i].xmin = &xmin;
@@ -615,14 +614,13 @@ int main(int argc, char** argv) {
 
 		debugUpdateMouse(window, mouseX, mouseY);
 		prec_force_mode = debugGetPrecMode();
-		hoist_mode      = debugGetHoistMode();
 		simd_mode       = debugGetSimdMode();
 		move_par_mode   = debugGetMoveParallelMode();
 		border_opt_mode = debugGetBorderOptMode();
 		debugSetCurrentZoom(INITIAL_X_RANGE / (xmax - xmin));
 		if (debugConsumeDirty()) {
-			int new_max_n = debugGetMaxN();
-			for (int i = 0; i < num_threads; i++) arguments[i].max_n = new_max_n;
+			int new_max_iter = debugGetMaxN();
+			for (int i = 0; i < num_threads; i++) arguments[i].max_iter = new_max_iter;
 			markAllCellsDirty();
 		}
 
