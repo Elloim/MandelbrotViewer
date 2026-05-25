@@ -27,6 +27,17 @@ int  debugGetSimdMode(void);
 /* 0=pointer-deref args inside hot loop, 1=hoisted by-value args. */
 int  debugGetHoistMode(void);
 
+/* 0=single-threaded movePixelData, 1=multi-threaded staging-buffer version.
+ * Off by default — has been known to produce visible artifacts. */
+int  debugGetMoveParallelMode(void);
+
+/* 0=hide cell-grid overlay, 1=show. On by default (matches the previous
+ * always-on behavior). */
+int  debugGetShowCells(void);
+
+/* 0=uncapped frame rate, 1=cap to monitor refresh rate (frame-end sleep). */
+int  debugGetFpsCapMode(void);
+
 /* Held-button zoom rate (factor per second). */
 long double debugGetZoomPerSec(void);
 

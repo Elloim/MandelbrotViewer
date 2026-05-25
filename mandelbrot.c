@@ -389,7 +389,7 @@ void movePixelData(unsigned char * data, int relX, int relY) {
 	}
 }
 
-/* ---------- Parallel movePixelData ---------- */
+/* ---------- Parallel movePixelData (opt-in via debug toggle) ---------- */
 
 #define MOVE_PARALLEL_THRESHOLD (1024 * 1024)  /* 1 MB */
 
@@ -443,7 +443,6 @@ void movePixelDataParallel(unsigned char* data, int relX, int relY, int n_thread
 		return;
 	}
 
-	/* Lazy-grow staging buffer; reused across calls. */
 	if (total_bytes > move_temp_cap) {
 		free(move_temp);
 		move_temp = (unsigned char*) malloc(total_bytes);
@@ -459,19 +458,18 @@ void movePixelDataParallel(unsigned char* data, int relX, int relY, int n_thread
 	move_chunk_t args[n_threads];
 
 	for (int t = 0; t < n_threads; t++) {
-		args[t].data       = data;
-		args[t].temp       = move_temp;
-		args[t].width      = width;
-		args[t].startX     = startX;
-		args[t].lengthX    = lengthX;
-		args[t].startY     = startY;
-		args[t].destX      = destX;
-		args[t].destY      = destY;
-		args[t].row_start  = t       * lengthY / n_threads;
-		args[t].row_end    = (t + 1) * lengthY / n_threads;
+		args[t].data      = data;
+		args[t].temp      = move_temp;
+		args[t].width     = width;
+		args[t].startX    = startX;
+		args[t].lengthX   = lengthX;
+		args[t].startY    = startY;
+		args[t].destX     = destX;
+		args[t].destY     = destY;
+		args[t].row_start = t       * lengthY / n_threads;
+		args[t].row_end   = (t + 1) * lengthY / n_threads;
 	}
 
-	/* Phase 1: data → temp (no aliasing, fully parallel). */
 	int created = 0;
 	for (int t = 0; t < n_threads; t++) {
 		args[t].phase = 0;
@@ -480,7 +478,6 @@ void movePixelDataParallel(unsigned char* data, int relX, int relY, int n_thread
 	}
 	for (int t = 0; t < created; t++) pthread_join(threads[t], NULL);
 
-	/* Phase 2: temp → data. */
 	created = 0;
 	for (int t = 0; t < n_threads; t++) {
 		args[t].phase = 1;

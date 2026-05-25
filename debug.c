@@ -143,6 +143,9 @@ static struct {
 	int texture_mode;     /* 0=glDrawPixels, 1=textured quad              */
 	int simd_mode;        /* 0=scalar, 1=AVX2                             */
 	int hoist_mode;       /* 0=pointer-deref args, 1=hoisted-by-value     */
+	int move_par_mode;    /* 0=single-threaded move, 1=parallel           */
+	int show_cells_mode;  /* 0=hide cell grid overlay, 1=show             */
+	int fps_cap_mode;     /* 0=uncapped, 1=cap to monitor refresh rate    */
 	double zoom_rate_t;   /* slider position [0,1] for the zoom rate      */
 	long double current_zoom; /* main.c pushes this for the readout       */
 
@@ -180,6 +183,9 @@ static struct {
 	int tex_y;
 	int simd_y;
 	int hoist_y;
+	int move_par_y;
+	int cells_y;
+	int fps_cap_y;
 } dbg;
 
 static long double zoomRateFromT(double t) {
@@ -240,10 +246,13 @@ static void recomputeLayout(int fb_h) {
 
 	dbg.sq_sz = sq_sz;
 	dbg.sq_x = dbg.wx + dbg.ww - WIDGET_PAD - sq_sz;
-	dbg.prec_y  = y; y += dbg.line_h;
-	dbg.tex_y   = y; y += dbg.line_h;
-	dbg.simd_y  = y; y += dbg.line_h;
-	dbg.hoist_y = y; y += dbg.line_h;
+	dbg.prec_y    = y; y += dbg.line_h;
+	dbg.tex_y     = y; y += dbg.line_h;
+	dbg.simd_y    = y; y += dbg.line_h;
+	dbg.hoist_y   = y; y += dbg.line_h;
+	dbg.move_par_y = y; y += dbg.line_h;
+	dbg.cells_y    = y; y += dbg.line_h;
+	dbg.fps_cap_y  = y; y += dbg.line_h;
 
 	y += WIDGET_PAD;
 	dbg.wh = y - dbg.wy;
@@ -254,20 +263,26 @@ void debugInit(int initial_max_n) {
 	dbg.visible = 1;
 	dbg.max_n = initial_max_n;
 	dbg.zoom_rate_t = tFromZoomRate(4.0L);
-	dbg.texture_mode = 1;       /* optimized defaults                       */
-	dbg.simd_mode = 1;
-	dbg.hoist_mode = 1;
+	dbg.texture_mode    = 1;    /* optimized defaults                       */
+	dbg.simd_mode       = 1;
+	dbg.hoist_mode      = 1;
+	dbg.move_par_mode   = 0;    /* off — parallel move had artifacts        */
+	dbg.show_cells_mode = 1;    /* preserves prior always-on behavior       */
+	dbg.fps_cap_mode    = 1;    /* save CPU by default                      */
 	dbg.current_zoom = 1.0L;
 	dbg.last_update = glfwGetTime();
 	recomputeLayout(1500);
 }
 
-int debugGetMaxN(void)         { return dbg.max_n; }
-int debugGetPrecMode(void)     { return dbg.prec_mode; }
-int debugGetTextureMode(void)  { return dbg.texture_mode; }
-int debugGetSimdMode(void)     { return dbg.simd_mode; }
-int debugGetHoistMode(void)    { return dbg.hoist_mode; }
-int debugCapturesMouse(void)   { return dbg.captured; }
+int debugGetMaxN(void)               { return dbg.max_n; }
+int debugGetPrecMode(void)           { return dbg.prec_mode; }
+int debugGetTextureMode(void)        { return dbg.texture_mode; }
+int debugGetSimdMode(void)           { return dbg.simd_mode; }
+int debugGetHoistMode(void)          { return dbg.hoist_mode; }
+int debugGetMoveParallelMode(void)   { return dbg.move_par_mode; }
+int debugGetShowCells(void)          { return dbg.show_cells_mode; }
+int debugGetFpsCapMode(void)         { return dbg.fps_cap_mode; }
+int debugCapturesMouse(void)         { return dbg.captured; }
 
 long double debugGetZoomPerSec(void) { return zoomRateFromT(dbg.zoom_rate_t); }
 void        debugSetCurrentZoom(long double zoom) { dbg.current_zoom = zoom; }
@@ -409,6 +424,22 @@ void debugMouseButtonCallback(GLFWwindow* window, int button, int action, int mo
 		dbg.dirty = 1;
 		return;
 	}
+	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.move_par_y + (dbg.line_h - dbg.sq_sz) / 2,
+	                   dbg.sq_sz, dbg.sq_sz, spad)) {
+		dbg.move_par_mode = !dbg.move_par_mode;
+		/* No dirty bit — output is identical, just changes implementation. */
+		return;
+	}
+	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.cells_y + (dbg.line_h - dbg.sq_sz) / 2,
+	                   dbg.sq_sz, dbg.sq_sz, spad)) {
+		dbg.show_cells_mode = !dbg.show_cells_mode;
+		return;
+	}
+	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.fps_cap_y + (dbg.line_h - dbg.sq_sz) / 2,
+	                   dbg.sq_sz, dbg.sq_sz, spad)) {
+		dbg.fps_cap_mode = !dbg.fps_cap_mode;
+		return;
+	}
 }
 
 void debugUpdateMouse(GLFWwindow* window, double mouseX, double mouseY) {
@@ -462,6 +493,7 @@ static void drawText(int x, int y, const char* text, int scale) {
 
 void debugDrawCellGrid(int win_w, int win_h, int rows, int cols) {
 	if (!dbg.visible) return;
+	if (!dbg.show_cells_mode) return;
 	if (rows <= 0 || cols <= 0) return;
 
 	GLboolean had_depth = glIsEnabled(GL_DEPTH_TEST);
@@ -635,10 +667,13 @@ void debugRender(int win_w, int win_h) {
 
 	char prec_letter = (dbg.prec_mode == 1) ? 'D' :
 	                   (dbg.prec_mode == 2) ? 'L' : 'A';
-	drawToggleRow(dbg.prec_y,  "prec",            s, 0, dbg.prec_mode, prec_letter);
-	drawToggleRow(dbg.tex_y,   "texture upload",  s, 1, dbg.texture_mode, 0);
-	drawToggleRow(dbg.simd_y,  "SIMD",            s, 1, dbg.simd_mode,    0);
-	drawToggleRow(dbg.hoist_y, "hoist args",      s, 1, dbg.hoist_mode,   0);
+	drawToggleRow(dbg.prec_y,     "prec",            s, 0, dbg.prec_mode, prec_letter);
+	drawToggleRow(dbg.tex_y,      "texture upload",  s, 1, dbg.texture_mode,   0);
+	drawToggleRow(dbg.simd_y,     "SIMD",            s, 1, dbg.simd_mode,      0);
+	drawToggleRow(dbg.hoist_y,    "hoist args",      s, 1, dbg.hoist_mode,     0);
+	drawToggleRow(dbg.move_par_y, "parallel move",   s, 1, dbg.move_par_mode,  0);
+	drawToggleRow(dbg.cells_y,    "show cells",      s, 1, dbg.show_cells_mode, 0);
+	drawToggleRow(dbg.fps_cap_y,  "FPS cap",         s, 1, dbg.fps_cap_mode,   0);
 
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 

@@ -24,11 +24,11 @@ void * createThread(void * args);
 void updateCellsTab(int relX, int relY);
 void movePixelData(unsigned char * data, int relX, int relY);
 
-/* Multi-threaded movePixelData. Below an internal byte threshold (small pans)
- * the function falls back to the single-threaded path because pthread launch
- * overhead would dwarf the copy. For large pans uses a temp staging buffer
- * (allocated once, grown on demand) to avoid the source/dest overlap race
- * inherent in row-parallel in-place shifting. */
+/* Multi-threaded movePixelData. Two-phase data→temp→data with a lazy-grown
+ * staging buffer; below the internal byte threshold (small pans) it falls
+ * back to the single-threaded path because pthread launch overhead would
+ * dwarf the copy. Disabled by default — see the parallel-move toggle.
+ * Has caused visible buffer artifacts in past testing, hence opt-in only. */
 void movePixelDataParallel(unsigned char * data, int relX, int relY, int n_threads);
 
 /* Shared state — defined in main.c */

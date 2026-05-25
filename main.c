@@ -9,6 +9,7 @@
 #include <string.h>
 #include <math.h>
 #include <pthread.h>
+#include <time.h>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -53,6 +54,8 @@ int cell_pixel_height = 0;
 int prec_force_mode = 0;   /* updated each frame from debugGetPrecMode() */
 int hoist_mode      = 1;   /* updated each frame from debugGetHoistMode() */
 int simd_mode       = 1;   /* updated each frame from debugGetSimdMode() */
+
+static int move_par_mode = 0;   /* updated each frame from debugGetMoveParallelMode() */
 
 /* Range of the initial view; used to compute the "current zoom" readout. */
 #define INITIAL_X_RANGE 3.0L
@@ -309,7 +312,8 @@ void moveAround(GLFWwindow* window, unsigned char * data,
 			markAllCellsDirty();
 		} else {
 			updateCellsTab(dx, dy);
-			movePixelDataParallel(data, dx, dy, 16);
+			if (move_par_mode) movePixelDataParallel(data, dx, dy, 16);
+			else               movePixelData(data, dx, dy);
 		}
 		return;
 	}
@@ -359,7 +363,8 @@ void moveAround(GLFWwindow* window, unsigned char * data,
 			markAllCellsDirty();
 		} else {
 			updateCellsTab(relX, relY);
-			movePixelDataParallel(data, relX, relY, 16);
+			if (move_par_mode) movePixelDataParallel(data, relX, relY, 16);
+			else               movePixelData(data, relX, relY);
 		}
 	}
 }
@@ -433,6 +438,16 @@ int main(int argc, char** argv) {
 
 	/* Use actual framebuffer size — may differ from requested on HiDPI/Wayland. */
 	glfwGetFramebufferSize(window, &width, &height);
+
+	/* Pull the primary monitor's refresh rate for the optional FPS cap.
+	 * Falls back to 60 Hz if GLFW can't tell us. */
+	int refresh_rate = 60;
+	GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+	if (monitor) {
+		const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+		if (mode && mode->refreshRate > 0) refresh_rate = mode->refreshRate;
+	}
+	double frame_min_interval = 1.0 / refresh_rate;
 
 	initFractalTexture(width, height);
 
@@ -554,6 +569,7 @@ int main(int argc, char** argv) {
 		prec_force_mode = debugGetPrecMode();
 		hoist_mode      = debugGetHoistMode();
 		simd_mode       = debugGetSimdMode();
+		move_par_mode   = debugGetMoveParallelMode();
 		debugSetCurrentZoom(INITIAL_X_RANGE / (xmax - xmin));
 		if (debugConsumeDirty()) {
 			int new_max_n = debugGetMaxN();
@@ -657,6 +673,17 @@ int main(int argc, char** argv) {
 		glfwPollEvents();
 		debugTick(glfwGetTime());
 		printMsPerFrame(&LastTime, &nbFrames);
+
+		if (debugGetFpsCapMode()) {
+			double elapsed = glfwGetTime() - now;   /* now = start-of-frame */
+			if (elapsed < frame_min_interval) {
+				double sleep_sec = frame_min_interval - elapsed;
+				struct timespec ts;
+				ts.tv_sec  = (time_t)sleep_sec;
+				ts.tv_nsec = (long)((sleep_sec - (double)ts.tv_sec) * 1e9);
+				nanosleep(&ts, NULL);
+			}
+		}
 	}
 
 	glDeleteTextures(1, &fractal_tex);
