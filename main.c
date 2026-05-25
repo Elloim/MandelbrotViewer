@@ -129,32 +129,49 @@ static int    sel_active = 0;
 static double sel_start_x = 0, sel_start_y = 0;
 static double sel_end_x   = 0, sel_end_y   = 0;
 
-/* Snap (x0,y0,x1,y1) to the window's aspect ratio by expanding the deficient
- * dimension around the selection center. Caller passes screen-space coords. */
+/* Sub-pixel pan residuals. The buffer can only shift by integer pixels, so
+ * the world view must too — otherwise the freshly-rendered strip (at the
+ * new xmin) and the shifted older content disagree by the fractional
+ * remainder, showing as a seam. We accumulate the fraction here and apply
+ * it whenever it crosses a whole pixel. */
+static double pan_accum_x = 0.0;
+static double pan_accum_y = 0.0;
+static double pan_accum_kbd_x = 0.0;
+static double pan_accum_kbd_y = 0.0;
+
+/* Aspect-lock (x0,y0,x1,y1) to the window's aspect ratio by anchoring
+ * (x0,y0) and moving (x1,y1) outward along whichever axis is deficient.
+ * Direction-preserving: the moved corner stays in the same quadrant
+ * relative to (x0,y0) as the input, so reversing across the anchor
+ * mid-drag just rotates the rect around it. Caller passes screen-space
+ * coords; output is the rect's min/max for drawing/zoom consumers. */
 static void aspectLockRect(double x0, double y0, double x1, double y1,
                            int win_w, int win_h,
                            double* out_min_x, double* out_min_y,
                            double* out_max_x, double* out_max_y) {
-	double min_x = x0 < x1 ? x0 : x1;
-	double max_x = x0 > x1 ? x0 : x1;
-	double min_y = y0 < y1 ? y0 : y1;
-	double max_y = y0 > y1 ? y0 : y1;
-	double dx = max_x - min_x;
-	double dy = max_y - min_y;
+	double dx = x1 - x0;
+	double dy = y1 - y0;
+	double adx = fabs(dx);
+	double ady = fabs(dy);
 	double aspect_win = (double)win_w / (double)win_h;
-	if (dy == 0 || dx / dy > aspect_win) {
-		double target_dy = dx / aspect_win;
-		double cy = (min_y + max_y) / 2.0;
-		min_y = cy - target_dy / 2.0;
-		max_y = cy + target_dy / 2.0;
+
+	if (ady == 0.0 || adx / ady > aspect_win) {
+		/* X dominates: extend Y to match aspect, keeping its sign so the
+		 * moved corner stays on the same side of the anchor. dy == 0 falls
+		 * here and defaults to extending downward (positive y). */
+		double target_ady = adx / aspect_win;
+		double sign_y = (dy >= 0.0) ? 1.0 : -1.0;
+		y1 = y0 + sign_y * target_ady;
 	} else {
-		double target_dx = dy * aspect_win;
-		double cx = (min_x + max_x) / 2.0;
-		min_x = cx - target_dx / 2.0;
-		max_x = cx + target_dx / 2.0;
+		double target_adx = ady * aspect_win;
+		double sign_x = (dx >= 0.0) ? 1.0 : -1.0;
+		x1 = x0 + sign_x * target_adx;
 	}
-	*out_min_x = min_x; *out_max_x = max_x;
-	*out_min_y = min_y; *out_max_y = max_y;
+
+	*out_min_x = x0 < x1 ? x0 : x1;
+	*out_max_x = x0 > x1 ? x0 : x1;
+	*out_min_y = y0 < y1 ? y0 : y1;
+	*out_max_y = y0 > y1 ? y0 : y1;
 }
 
 static void histPush(view_t** stack, int* count, view_t v) {
@@ -296,12 +313,21 @@ void moveAround(GLFWwindow* window, unsigned char * data,
 	}
 
 	if (left_down) {
-		int dx = (int)(prevmouseX - mouseX);
-		int dy = (int)(mouseY - prevmouseY);
+		/* Carry sub-pixel mouse motion across frames: the buffer can only
+		 * shift by whole pixels, so the world offset must come from the
+		 * integer pixel delta — otherwise xmin drifts away from the
+		 * shifted buffer and a seam appears. The fractional remainder is
+		 * folded back in next frame so slow drags still track the mouse. */
+		double raw_dx = (prevmouseX - mouseX) + pan_accum_x;
+		double raw_dy = (mouseY - prevmouseY) + pan_accum_y;
+		int dx = (int)raw_dx;
+		int dy = (int)raw_dy;
+		pan_accum_x = raw_dx - dx;
+		pan_accum_y = raw_dy - dy;
 		if (dx == 0 && dy == 0) return;
 
-		long double offsetX = (prevmouseX - mouseX) * xscale;
-		long double offsetY = -(prevmouseY - mouseY) * yscale;
+		long double offsetX = (long double)dx * xscale;
+		long double offsetY = (long double)dy * yscale;
 		*xmin += offsetX;
 		*xmax += offsetX;
 		*ymin += offsetY;
@@ -344,21 +370,35 @@ void moveAround(GLFWwindow* window, unsigned char * data,
 	int ku = !ctrl_held && glfwGetKey(window, GLFW_KEY_UP)    == GLFW_PRESS;
 	int kd = !ctrl_held && glfwGetKey(window, GLFW_KEY_DOWN)  == GLFW_PRESS;
 	if (kl || kr || ku || kd) {
-		long double pan_rate = 0.5L * (long double)dt;   /* half a view per second */
-		long double dxc = 0, dyc = 0;
-		if (kr) dxc += (*xmax - *xmin) * pan_rate;
-		if (kl) dxc -= (*xmax - *xmin) * pan_rate;
-		if (ku) dyc += (*ymax - *ymin) * pan_rate;
-		if (kd) dyc -= (*ymax - *ymin) * pan_rate;
-		*xmin += dxc; *xmax += dxc;
-		*ymin += dyc; *ymax += dyc;
+		/* "Half a view per second" in pixel space is just half a window per
+		 * second — independent of zoom. Driving the world delta off the
+		 * integer pixel delta (with sub-pixel residual carried in
+		 * pan_accum_kbd_*) keeps xmin and the buffer in lockstep, same
+		 * reason as the mouse-pan branch above. */
+		double pan_rate = 0.5 * dt;
+		double px_x = 0.0, px_y = 0.0;
+		if (kr) px_x += (double)width  * pan_rate;
+		if (kl) px_x -= (double)width  * pan_rate;
+		if (ku) px_y += (double)height * pan_rate;
+		if (kd) px_y -= (double)height * pan_rate;
 
-		int relX = (int)(dxc / xscale);
-		int relY = (int)(dyc / yscale);
+		px_x += pan_accum_kbd_x;
+		px_y += pan_accum_kbd_y;
+		int relX = (int)px_x;
+		int relY = (int)px_y;
+		pan_accum_kbd_x = px_x - relX;
+		pan_accum_kbd_y = px_y - relY;
+
+		long double offsetX = (long double)relX * xscale;
+		long double offsetY = (long double)relY * yscale;
+		*xmin += offsetX; *xmax += offsetX;
+		*ymin += offsetY; *ymax += offsetY;
+
 		if (did_zoom) {
 			/* Zoom already invalidated every pixel; nothing to reuse. */
 		} else if (relX == 0 && relY == 0) {
-			/* Sub-pixel pan accumulates in xmin/ymin without re-render. */
+			/* Sub-pixel pan: residual stays in pan_accum_kbd_*, world and
+			 * buffer both untouched until the residual crosses a pixel. */
 		} else if (abs(relX) >= width || abs(relY) >= height) {
 			markAllCellsDirty();
 		} else {
