@@ -44,6 +44,8 @@ int gradient_points[][3] = {
 int * cells_to_update = NULL;
 int nb_cells_to_update = 0;
 
+int * cell_state = NULL;
+
 int global_count = 0;
 int cell_number = 0;
 int cell_number_row = 0;
@@ -54,6 +56,7 @@ int cell_pixel_height = 0;
 int prec_force_mode = 0;   /* updated each frame from debugGetPrecMode() */
 int hoist_mode      = 1;   /* updated each frame from debugGetHoistMode() */
 int simd_mode       = 1;   /* updated each frame from debugGetSimdMode() */
+int border_opt_mode = 1;   /* updated each frame from debugGetBorderOptMode() */
 
 static int move_par_mode = 0;   /* updated each frame from debugGetMoveParallelMode() */
 
@@ -519,6 +522,11 @@ int main(int argc, char** argv) {
 	cell_number_col = 100;
 	cell_number = cell_number_row * cell_number_col;
 	cells_to_update = (int *) malloc(cell_number * sizeof(int));
+	cell_state      = (int *) calloc((size_t)cell_number, sizeof(int));
+	if (!cells_to_update || !cell_state) {
+		fprintf(stderr, "Failed to allocate cell tracking arrays\n");
+		return -1;
+	}
 	markAllCellsDirty();
 
 	cell_pixel_width = width / cell_number_col;
@@ -610,6 +618,7 @@ int main(int argc, char** argv) {
 		hoist_mode      = debugGetHoistMode();
 		simd_mode       = debugGetSimdMode();
 		move_par_mode   = debugGetMoveParallelMode();
+		border_opt_mode = debugGetBorderOptMode();
 		debugSetCurrentZoom(INITIAL_X_RANGE / (xmax - xmin));
 		if (debugConsumeDirty()) {
 			int new_max_n = debugGetMaxN();
@@ -680,6 +689,10 @@ int main(int argc, char** argv) {
 
 		double thread_wait_ms = 0.0;
 		int work_done = 0;
+		/* Reset per-frame cell status so the green/blue overlay only marks
+		 * cells touched by *this* frame's workers. Unconditional — without it,
+		 * a frame with no work would inherit last frame's marks. */
+		memset(cell_state, 0, (size_t)cell_number * sizeof(int));
 		if (nb_cells_to_update > 0) {
 			int created = 0;
 			for (int i = 0; i < num_threads; i++) {
@@ -706,6 +719,7 @@ int main(int argc, char** argv) {
 		} else {
 			glDrawPixels(width, height, GL_RGB, GL_UNSIGNED_BYTE, data);
 		}
+		debugDrawCellOverlays(width, height, cell_number_row, cell_number_col, cell_state);
 		debugDrawCellGrid(width, height, cell_number_row, cell_number_col);
 		drawSelectionOverlay(width, height);
 		debugRender(width, height);
@@ -730,6 +744,7 @@ int main(int argc, char** argv) {
 	free(data);
 	free(gradient);
 	free(cells_to_update);
+	free(cell_state);
 	free(hist_back);
 	free(hist_forward);
 	glfwDestroyWindow(window);

@@ -35,6 +35,11 @@ int  debugGetMoveParallelMode(void);
  * always-on behavior). */
 int  debugGetShowCells(void);
 
+/* 0=disable border-perimeter fast path, 1=enable. When enabled, workers
+ * compute each cell's perimeter first and skip the interior if every border
+ * pixel reached max_n. */
+int  debugGetBorderOptMode(void);
+
 /* 0=uncapped frame rate, 1=cap to monitor refresh rate (frame-end sleep). */
 int  debugGetFpsCapMode(void);
 
@@ -71,6 +76,12 @@ void debugRecordThreadWait(double wait_ms);
  * same proportional row/col math as the compute path so the lines align
  * with actual cell boundaries. */
 void debugDrawCellGrid(int win_w, int win_h, int rows, int cols);
+
+/* Tint cells that workers touched this frame. Green for CELL_STATE_COMPUTED,
+ * blue for CELL_STATE_BORDER_SKIPPED. No-op when the cell-grid overlay is
+ * hidden. `cell_state` is indexed row*cols+col, length rows*cols. */
+void debugDrawCellOverlays(int win_w, int win_h, int rows, int cols,
+                           const int * cell_state);
 
 /* Draw the overlay (no-op when hidden). win_w/win_h are framebuffer pixels. */
 void debugRender(int win_w, int win_h);

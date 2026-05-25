@@ -18,6 +18,14 @@ typedef struct args_t {
 	int max_n;
 } args_t;
 
+/* Per-cell state set by workers each frame. Read by the debug overlay to
+ * paint green (just-computed) or blue (border-optimization skipped the
+ * interior) tints on cells. Reset to NONE at the top of every frame by
+ * main.c. */
+#define CELL_STATE_NONE            0
+#define CELL_STATE_COMPUTED        1
+#define CELL_STATE_BORDER_SKIPPED  2
+
 /* Public API */
 void gradientInterpol(int points[][3], unsigned char ** gradient, int nb_points, int nb_gradients);
 void * createThread(void * args);
@@ -38,6 +46,10 @@ extern int height;
 extern int * cells_to_update;
 extern int nb_cells_to_update;
 
+/* Per-cell status for this frame: CELL_STATE_NONE / _COMPUTED /
+ * _BORDER_SKIPPED. Sized cell_number, indexed row*cell_number_col+col. */
+extern int * cell_state;
+
 extern int global_count;
 extern int cell_number;
 extern int cell_number_row;
@@ -57,5 +69,11 @@ extern int hoist_mode;
  * per row at a time); 0 = scalar inner loop. Has no effect when the long-
  * double path is active (long double has no SIMD path). */
 extern int simd_mode;
+
+/* 1 = compute each cell's perimeter first; if every border pixel reached
+ * max_n, fill the interior with black (the set is connected, so an all-
+ * max_n border implies an all-max_n interior) and mark CELL_STATE_BORDER_
+ * SKIPPED. 0 = always compute every pixel. */
+extern int border_opt_mode;
 
 #endif

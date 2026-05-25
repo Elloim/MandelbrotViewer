@@ -13,6 +13,7 @@
 #include <GL/glew.h>
 
 #include "debug.h"
+#include "mandelbrot.h"   /* CELL_STATE_* */
 
 #define WIDGET_X       10
 #define WIDGET_Y       10
@@ -145,6 +146,7 @@ static struct {
 	int hoist_mode;       /* 0=pointer-deref args, 1=hoisted-by-value     */
 	int move_par_mode;    /* 0=single-threaded move, 1=parallel           */
 	int show_cells_mode;  /* 0=hide cell grid overlay, 1=show             */
+	int border_opt_mode;  /* 0=disable border fast path, 1=enable         */
 	int fps_cap_mode;     /* 0=uncapped, 1=cap to monitor refresh rate    */
 	double zoom_rate_t;   /* slider position [0,1] for the zoom rate      */
 	long double current_zoom; /* main.c pushes this for the readout       */
@@ -185,6 +187,7 @@ static struct {
 	int hoist_y;
 	int move_par_y;
 	int cells_y;
+	int border_opt_y;
 	int fps_cap_y;
 } dbg;
 
@@ -250,9 +253,10 @@ static void recomputeLayout(int fb_h) {
 	dbg.tex_y     = y; y += dbg.line_h;
 	dbg.simd_y    = y; y += dbg.line_h;
 	dbg.hoist_y   = y; y += dbg.line_h;
-	dbg.move_par_y = y; y += dbg.line_h;
-	dbg.cells_y    = y; y += dbg.line_h;
-	dbg.fps_cap_y  = y; y += dbg.line_h;
+	dbg.move_par_y  = y; y += dbg.line_h;
+	dbg.cells_y     = y; y += dbg.line_h;
+	dbg.border_opt_y = y; y += dbg.line_h;
+	dbg.fps_cap_y   = y; y += dbg.line_h;
 
 	y += WIDGET_PAD;
 	dbg.wh = y - dbg.wy;
@@ -268,6 +272,7 @@ void debugInit(int initial_max_n) {
 	dbg.hoist_mode      = 1;
 	dbg.move_par_mode   = 0;    /* off — parallel move had artifacts        */
 	dbg.show_cells_mode = 1;    /* preserves prior always-on behavior       */
+	dbg.border_opt_mode = 1;    /* perimeter-skip is pure win when it fires */
 	dbg.fps_cap_mode    = 1;    /* save CPU by default                      */
 	dbg.current_zoom = 1.0L;
 	dbg.last_update = glfwGetTime();
@@ -281,6 +286,7 @@ int debugGetSimdMode(void)           { return dbg.simd_mode; }
 int debugGetHoistMode(void)          { return dbg.hoist_mode; }
 int debugGetMoveParallelMode(void)   { return dbg.move_par_mode; }
 int debugGetShowCells(void)          { return dbg.show_cells_mode; }
+int debugGetBorderOptMode(void)      { return dbg.border_opt_mode; }
 int debugGetFpsCapMode(void)         { return dbg.fps_cap_mode; }
 int debugCapturesMouse(void)         { return dbg.captured; }
 
@@ -435,6 +441,13 @@ void debugMouseButtonCallback(GLFWwindow* window, int button, int action, int mo
 		dbg.show_cells_mode = !dbg.show_cells_mode;
 		return;
 	}
+	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.border_opt_y + (dbg.line_h - dbg.sq_sz) / 2,
+	                   dbg.sq_sz, dbg.sq_sz, spad)) {
+		dbg.border_opt_mode = !dbg.border_opt_mode;
+		/* No dirty bit — output is pixel-identical, just changes the
+		 * compute path workers take. */
+		return;
+	}
 	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.fps_cap_y + (dbg.line_h - dbg.sq_sz) / 2,
 	                   dbg.sq_sz, dbg.sq_sz, spad)) {
 		dbg.fps_cap_mode = !dbg.fps_cap_mode;
@@ -489,6 +502,70 @@ static void drawText(int x, int y, const char* text, int scale) {
 		}
 	}
 	glEnd();
+}
+
+/* Translucent per-cell tints showing which cells the workers touched this
+ * frame. Same proportional row/col math as the grid lines and the compute
+ * path. Two passes (one color each) so glColor4f isn't toggled per cell. */
+void debugDrawCellOverlays(int win_w, int win_h, int rows, int cols,
+                           const int * cell_state) {
+	if (!dbg.visible) return;
+	if (!dbg.show_cells_mode) return;
+	if (rows <= 0 || cols <= 0 || !cell_state) return;
+
+	GLboolean had_depth = glIsEnabled(GL_DEPTH_TEST);
+	GLboolean had_blend = glIsEnabled(GL_BLEND);
+
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix();
+	glLoadIdentity();
+	glOrtho(0, win_w, win_h, 0, -1, 1);
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
+	glLoadIdentity();
+
+	glDisable(GL_DEPTH_TEST);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	int target_states[2] = { CELL_STATE_COMPUTED, CELL_STATE_BORDER_SKIPPED };
+	float colors[2][4] = {
+		{ 0.0f, 1.0f, 0.0f, 0.48f },   /* green: just computed                */
+		{ 0.0f, 0.4f, 1.0f, 0.48f },   /* blue:  border-opt skipped interior  */
+	};
+
+	/* The pixel buffer is bottom-up (row 0 at the bottom of the screen,
+	 * per glRasterPos2i(-1,-1) + glDrawPixels), but glOrtho here is top-
+	 * down. So cell row r lives at screen y in [win_h-(r+1)·h/rows,
+	 * win_h-r·h/rows]. The grid-line pass gets away without this flip
+	 * because evenly-spaced horizontal lines look identical either way. */
+	for (int pass = 0; pass < 2; pass++) {
+		glColor4f(colors[pass][0], colors[pass][1],
+		          colors[pass][2], colors[pass][3]);
+		glBegin(GL_QUADS);
+		for (int r = 0; r < rows; r++) {
+			int y0 = (int)((long)(rows - r - 1) * win_h / rows);
+			int y1 = (int)((long)(rows - r)     * win_h / rows);
+			for (int c = 0; c < cols; c++) {
+				if (cell_state[r * cols + c] != target_states[pass]) continue;
+				int x0 = (int)((long)c * win_w / cols);
+				int x1 = (int)((long)(c + 1) * win_w / cols);
+				glVertex2i(x0, y0);
+				glVertex2i(x1, y0);
+				glVertex2i(x1, y1);
+				glVertex2i(x0, y1);
+			}
+		}
+		glEnd();
+	}
+
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glMatrixMode(GL_MODELVIEW);
+	glPopMatrix();
+
+	if (!had_blend) glDisable(GL_BLEND);
+	if (had_depth)  glEnable(GL_DEPTH_TEST);
 }
 
 void debugDrawCellGrid(int win_w, int win_h, int rows, int cols) {
@@ -671,9 +748,10 @@ void debugRender(int win_w, int win_h) {
 	drawToggleRow(dbg.tex_y,      "texture upload",  s, 1, dbg.texture_mode,   0);
 	drawToggleRow(dbg.simd_y,     "SIMD",            s, 1, dbg.simd_mode,      0);
 	drawToggleRow(dbg.hoist_y,    "hoist args",      s, 1, dbg.hoist_mode,     0);
-	drawToggleRow(dbg.move_par_y, "parallel move",   s, 1, dbg.move_par_mode,  0);
-	drawToggleRow(dbg.cells_y,    "show cells",      s, 1, dbg.show_cells_mode, 0);
-	drawToggleRow(dbg.fps_cap_y,  "FPS cap",         s, 1, dbg.fps_cap_mode,   0);
+	drawToggleRow(dbg.move_par_y,  "parallel move",   s, 1, dbg.move_par_mode,   0);
+	drawToggleRow(dbg.cells_y,     "show cells",      s, 1, dbg.show_cells_mode, 0);
+	drawToggleRow(dbg.border_opt_y, "border opt",     s, 1, dbg.border_opt_mode, 0);
+	drawToggleRow(dbg.fps_cap_y,   "FPS cap",         s, 1, dbg.fps_cap_mode,    0);
 
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 

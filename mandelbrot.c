@@ -91,9 +91,101 @@ static int globalGetCellIndex(void) {
 	return cells_to_update[idx];
 }
 
+/* Fill a rectangle of the framebuffer with black (max_n color). Used when
+ * the border-opt fast path proves the interior is all in the set. */
+static void fillBlackRect(unsigned char * data,
+                          int line_start, int line_end,
+                          int col_start, int col_end) {
+	size_t row_bytes = (size_t)(col_end - col_start) * 3;
+	for (int i = line_start; i < line_end; i++) {
+		memset(&data[(i * width + col_start) * 3], 0, row_bytes);
+	}
+}
+
+/* Type-specialized perimeter-pixel computer. Walks the 4 sides of the cell
+ * (skipping corners on the side columns to avoid recomputing them), writes
+ * the pixels to `data`, and returns 1 if every border pixel reached max_n.
+ * The connectedness of the Mandelbrot set means that an all-max_n border
+ * implies an all-max_n interior — caller can fill the interior with black
+ * and skip the (typically dominant) interior compute. */
+#define DEFINE_COMPUTE_BORDER(NAME, T, MFN)                                    \
+static int NAME(unsigned char * gradient, unsigned char * data,                \
+                T xmin, T ymin, T xscale, T yscale,                            \
+                int line_start, int line_end, int col_start, int col_end,     \
+                int size_grad, int max_n) {                                    \
+	int all_max = 1;                                                           \
+	/* Top row */                                                              \
+	{                                                                          \
+		int i = line_start;                                                    \
+		T c_i_base = ymin + i * yscale;                                        \
+		for (int j = col_start; j < col_end; j++) {                            \
+			T c_r = xmin + j * xscale;                                         \
+			T c_i = c_i_base;                                                  \
+			int iter = MFN(&c_r, &c_i, max_n);                                 \
+			int count = (i * width + j) * 3;                                   \
+			coloring(gradient, data, iter,                                     \
+			         (double)c_r, (double)c_i,                                 \
+			         size_grad, max_n, count);                                 \
+			if (iter != max_n) all_max = 0;                                    \
+		}                                                                      \
+	}                                                                          \
+	/* Bottom row (only if distinct from top) */                               \
+	if (line_end - line_start > 1) {                                           \
+		int i = line_end - 1;                                                  \
+		T c_i_base = ymin + i * yscale;                                        \
+		for (int j = col_start; j < col_end; j++) {                            \
+			T c_r = xmin + j * xscale;                                         \
+			T c_i = c_i_base;                                                  \
+			int iter = MFN(&c_r, &c_i, max_n);                                 \
+			int count = (i * width + j) * 3;                                   \
+			coloring(gradient, data, iter,                                     \
+			         (double)c_r, (double)c_i,                                 \
+			         size_grad, max_n, count);                                 \
+			if (iter != max_n) all_max = 0;                                    \
+		}                                                                      \
+	}                                                                          \
+	/* Left column, corners already done above */                              \
+	{                                                                          \
+		int j = col_start;                                                     \
+		T c_r_const = xmin + j * xscale;                                       \
+		for (int i = line_start + 1; i < line_end - 1; i++) {                  \
+			T c_r = c_r_const;                                                 \
+			T c_i = ymin + i * yscale;                                         \
+			int iter = MFN(&c_r, &c_i, max_n);                                 \
+			int count = (i * width + j) * 3;                                   \
+			coloring(gradient, data, iter,                                     \
+			         (double)c_r, (double)c_i,                                 \
+			         size_grad, max_n, count);                                 \
+			if (iter != max_n) all_max = 0;                                    \
+		}                                                                      \
+	}                                                                          \
+	/* Right column, corners already done above */                             \
+	if (col_end - col_start > 1) {                                             \
+		int j = col_end - 1;                                                   \
+		T c_r_const = xmin + j * xscale;                                       \
+		for (int i = line_start + 1; i < line_end - 1; i++) {                  \
+			T c_r = c_r_const;                                                 \
+			T c_i = ymin + i * yscale;                                         \
+			int iter = MFN(&c_r, &c_i, max_n);                                 \
+			int count = (i * width + j) * 3;                                   \
+			coloring(gradient, data, iter,                                     \
+			         (double)c_r, (double)c_i,                                 \
+			         size_grad, max_n, count);                                 \
+			if (iter != max_n) all_max = 0;                                    \
+		}                                                                      \
+	}                                                                          \
+	return all_max;                                                            \
+}
+
+DEFINE_COMPUTE_BORDER(computeBorderD, double,      mandelbrotFuncD)
+DEFINE_COMPUTE_BORDER(computeBorderL, long double, mandelbrotFuncL)
+
 /* Type-specialized worker body. Threads pull cells off the global queue and
- * fill in their pixels at type T precision (double or long double). */
-#define DEFINE_THREAD_FN(NAME, T, MFN)                                         \
+ * fill in their pixels at type T precision (double or long double). When
+ * border_opt_mode is on, each cell's perimeter is checked first via
+ * BORDER_FN; an all-max_n border lets the worker fill the interior with
+ * black and skip the bulk of the work (and mark the cell BORDER_SKIPPED). */
+#define DEFINE_THREAD_FN(NAME, T, MFN, BORDER_FN)                              \
 static void NAME(unsigned char * gradient, unsigned char * data,               \
                  T xmin, T ymin, T xscale, T yscale,                           \
                  int size_grad, int max_n) {                                   \
@@ -107,28 +199,59 @@ static void NAME(unsigned char * gradient, unsigned char * data,               \
 		int line_end   = (int)((long)(row + 1) * height / cell_number_row);    \
 		int col_start  = (int)((long)col * width / cell_number_col);           \
 		int col_end    = (int)((long)(col + 1) * width / cell_number_col);     \
-		for (int i = line_start; i < line_end; i++) {                          \
-			T c_i_base = ymin + i * yscale;                                    \
-			for (int j = col_start; j < col_end; j++) {                        \
-				T c_r = xmin + j * xscale;                                     \
-				T c_i = c_i_base;                                              \
-				int iter = MFN(&c_r, &c_i, max_n);                             \
-				int count = (i * width + j) * 3;                               \
-				coloring(gradient, data, iter,                                 \
-				         (double)c_r, (double)c_i,                             \
-				         size_grad, max_n, count);                             \
+		int has_interior = (line_end - line_start >= 3) &&                     \
+		                   (col_end  - col_start  >= 3);                       \
+		if (border_opt_mode && has_interior) {                                 \
+			int all_max = BORDER_FN(gradient, data,                            \
+			                        xmin, ymin, xscale, yscale,                \
+			                        line_start, line_end, col_start, col_end,  \
+			                        size_grad, max_n);                         \
+			if (all_max) {                                                     \
+				fillBlackRect(data, line_start + 1, line_end - 1,              \
+				              col_start + 1, col_end - 1);                     \
+				cell_state[cell_index] = CELL_STATE_BORDER_SKIPPED;            \
+				continue;                                                      \
+			}                                                                  \
+			for (int i = line_start + 1; i < line_end - 1; i++) {              \
+				T c_i_base = ymin + i * yscale;                                \
+				for (int j = col_start + 1; j < col_end - 1; j++) {            \
+					T c_r = xmin + j * xscale;                                 \
+					T c_i = c_i_base;                                          \
+					int iter = MFN(&c_r, &c_i, max_n);                         \
+					int count = (i * width + j) * 3;                           \
+					coloring(gradient, data, iter,                             \
+					         (double)c_r, (double)c_i,                         \
+					         size_grad, max_n, count);                         \
+				}                                                              \
+			}                                                                  \
+		} else {                                                               \
+			for (int i = line_start; i < line_end; i++) {                      \
+				T c_i_base = ymin + i * yscale;                                \
+				for (int j = col_start; j < col_end; j++) {                    \
+					T c_r = xmin + j * xscale;                                 \
+					T c_i = c_i_base;                                          \
+					int iter = MFN(&c_r, &c_i, max_n);                         \
+					int count = (i * width + j) * 3;                           \
+					coloring(gradient, data, iter,                             \
+					         (double)c_r, (double)c_i,                         \
+					         size_grad, max_n, count);                         \
+				}                                                              \
 			}                                                                  \
 		}                                                                      \
+		cell_state[cell_index] = CELL_STATE_COMPUTED;                          \
 	}                                                                          \
 }
 
-DEFINE_THREAD_FN(threadD, double,      mandelbrotFuncD)
-DEFINE_THREAD_FN(threadL, long double, mandelbrotFuncL)
+DEFINE_THREAD_FN(threadD, double,      mandelbrotFuncD, computeBorderD)
+DEFINE_THREAD_FN(threadL, long double, mandelbrotFuncL, computeBorderL)
 
 /* Pointer-deref worker body — the inner loop re-derefs xmin/ymin/xscale/
  * yscale on every pixel. Slower; exists so the debug-widget hoist toggle
- * has something observable to switch to. */
-#define DEFINE_THREAD_FN_DEREF(NAME, T, MFN)                                   \
+ * has something observable to switch to. The border helper is called with
+ * hoisted values (deref'd once at the boundary) — replaying the deref
+ * pattern there would only obscure the hoist toggle's effect on the
+ * dominant interior loop. */
+#define DEFINE_THREAD_FN_DEREF(NAME, T, MFN, BORDER_FN)                        \
 static void NAME(unsigned char * gradient, unsigned char * data,               \
                  long double * xmin_p, long double * ymin_p,                   \
                  long double * xscale_p, long double * yscale_p,               \
@@ -141,22 +264,50 @@ static void NAME(unsigned char * gradient, unsigned char * data,               \
 		int line_end   = (int)((long)(row + 1) * height / cell_number_row);    \
 		int col_start  = (int)((long)col * width / cell_number_col);           \
 		int col_end    = (int)((long)(col + 1) * width / cell_number_col);     \
-		for (int i = line_start; i < line_end; i++) {                          \
-			for (int j = col_start; j < col_end; j++) {                        \
-				T c_r = (T)(*xmin_p) + j * (T)(*xscale_p);                     \
-				T c_i = (T)(*ymin_p) + i * (T)(*yscale_p);                     \
-				int iter = MFN(&c_r, &c_i, max_n);                             \
-				int count = (i * width + j) * 3;                               \
-				coloring(gradient, data, iter,                                 \
-				         (double)c_r, (double)c_i,                             \
-				         size_grad, max_n, count);                             \
+		int has_interior = (line_end - line_start >= 3) &&                     \
+		                   (col_end  - col_start  >= 3);                       \
+		if (border_opt_mode && has_interior) {                                 \
+			int all_max = BORDER_FN(gradient, data,                            \
+			                        (T)(*xmin_p), (T)(*ymin_p),                \
+			                        (T)(*xscale_p), (T)(*yscale_p),            \
+			                        line_start, line_end, col_start, col_end,  \
+			                        size_grad, max_n);                         \
+			if (all_max) {                                                     \
+				fillBlackRect(data, line_start + 1, line_end - 1,              \
+				              col_start + 1, col_end - 1);                     \
+				cell_state[cell_index] = CELL_STATE_BORDER_SKIPPED;            \
+				continue;                                                      \
+			}                                                                  \
+			for (int i = line_start + 1; i < line_end - 1; i++) {              \
+				for (int j = col_start + 1; j < col_end - 1; j++) {            \
+					T c_r = (T)(*xmin_p) + j * (T)(*xscale_p);                 \
+					T c_i = (T)(*ymin_p) + i * (T)(*yscale_p);                 \
+					int iter = MFN(&c_r, &c_i, max_n);                         \
+					int count = (i * width + j) * 3;                           \
+					coloring(gradient, data, iter,                             \
+					         (double)c_r, (double)c_i,                         \
+					         size_grad, max_n, count);                         \
+				}                                                              \
+			}                                                                  \
+		} else {                                                               \
+			for (int i = line_start; i < line_end; i++) {                      \
+				for (int j = col_start; j < col_end; j++) {                    \
+					T c_r = (T)(*xmin_p) + j * (T)(*xscale_p);                 \
+					T c_i = (T)(*ymin_p) + i * (T)(*yscale_p);                 \
+					int iter = MFN(&c_r, &c_i, max_n);                         \
+					int count = (i * width + j) * 3;                           \
+					coloring(gradient, data, iter,                             \
+					         (double)c_r, (double)c_i,                         \
+					         size_grad, max_n, count);                         \
+				}                                                              \
 			}                                                                  \
 		}                                                                      \
+		cell_state[cell_index] = CELL_STATE_COMPUTED;                          \
 	}                                                                          \
 }
 
-DEFINE_THREAD_FN_DEREF(threadD_deref, double,      mandelbrotFuncD)
-DEFINE_THREAD_FN_DEREF(threadL_deref, long double, mandelbrotFuncL)
+DEFINE_THREAD_FN_DEREF(threadD_deref, double,      mandelbrotFuncD, computeBorderD)
+DEFINE_THREAD_FN_DEREF(threadL_deref, long double, mandelbrotFuncL, computeBorderL)
 
 /* ---------- AVX2 SIMD kernel (double precision, 4 pixels per call) ----------
  *
@@ -260,11 +411,32 @@ static void threadD_simd(unsigned char * gradient, unsigned char * data,
 		int col_start  = (int)((long)col * width / cell_number_col);
 		int col_end    = (int)((long)(col + 1) * width / cell_number_col);
 
-		for (int i = line_start; i < line_end; i++) {
-			__m256d ci = _mm256_set1_pd(ymin + i * yscale);
-			int j = col_start;
+		int has_interior = (line_end - line_start >= 3) && (col_end - col_start >= 3);
+		/* Default: SIMD walks the full cell. Border opt narrows this to the
+		 * strict interior; the perimeter is handled by the scalar helper. */
+		int i_lo = line_start, i_hi = line_end;
+		int j_lo = col_start,  j_hi = col_end;
 
-			for (; j + 4 <= col_end; j += 4) {
+		if (border_opt_mode && has_interior) {
+			int all_max = computeBorderD(gradient, data,
+			                             xmin, ymin, xscale, yscale,
+			                             line_start, line_end, col_start, col_end,
+			                             size_grad, max_n);
+			if (all_max) {
+				fillBlackRect(data, line_start + 1, line_end - 1,
+				              col_start + 1, col_end - 1);
+				cell_state[cell_index] = CELL_STATE_BORDER_SKIPPED;
+				continue;
+			}
+			i_lo = line_start + 1; i_hi = line_end - 1;
+			j_lo = col_start  + 1; j_hi = col_end  - 1;
+		}
+
+		for (int i = i_lo; i < i_hi; i++) {
+			__m256d ci = _mm256_set1_pd(ymin + i * yscale);
+			int j = j_lo;
+
+			for (; j + 4 <= j_hi; j += 4) {
 				__m256d cr_base = _mm256_set1_pd(xmin + j * xscale);
 				__m256d cr      = _mm256_add_pd(cr_base, j_step);
 
@@ -282,7 +454,7 @@ static void threadD_simd(unsigned char * gradient, unsigned char * data,
 			}
 
 			/* Scalar fallback for the 1-3 trailing pixels. */
-			for (; j < col_end; j++) {
+			for (; j < j_hi; j++) {
 				double c_r = xmin + j * xscale;
 				double c_i = ymin + i * yscale;
 				int iter = mandelbrotFuncD(&c_r, &c_i, max_n);
@@ -291,6 +463,7 @@ static void threadD_simd(unsigned char * gradient, unsigned char * data,
 				         size_grad, max_n, count);
 			}
 		}
+		cell_state[cell_index] = CELL_STATE_COMPUTED;
 	}
 }
 
