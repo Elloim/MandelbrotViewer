@@ -27,7 +27,12 @@ typedef struct args_t {
 #define CELL_STATE_BORDER_SKIPPED  2
 
 /* Public API */
-void gradientInterpol(const int points[][3], unsigned char ** gradient, int nb_points, int nb_gradients);
+
+/* Builds a (nb_points-1)*nb_gradients entry RGB ramp into *gradient.
+ * Returns 1 on success, 0 if the allocation failed or the stop count is
+ * degenerate; *gradient is set to NULL in that case and the caller keeps
+ * whatever ramp it already had. */
+int  gradientInterpol(const int points[][3], unsigned char ** gradient, int nb_points, int nb_gradients);
 void * createThread(void * args);
 void updateCellsTab(int pan_dx, int pan_dy);
 void movePixelData(unsigned char * data, int pan_dx, int pan_dy);
@@ -38,6 +43,9 @@ void movePixelData(unsigned char * data, int pan_dx, int pan_dy);
  * dwarf the copy. Disabled by default — see the parallel-move toggle.
  * Has caused visible buffer artifacts in past testing, hence opt-in only. */
 void movePixelDataParallel(unsigned char * data, int pan_dx, int pan_dy, int n_threads);
+
+/* Release the parallel-move staging buffer. Call once at shutdown. */
+void movePixelDataParallelFree(void);
 
 /* Shared state — defined in main.c */
 extern int width;

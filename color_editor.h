@@ -33,9 +33,10 @@ int  colorEditorNumStops(void);
 void colorEditorKeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
 void colorEditorMouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
 
-/* Per-frame cursor position — drives drag of the picker controls. No-op
+/* Per-frame cursor position in FRAMEBUFFER pixels (see
+ * uiCursorToFramebuffer) — drives drag of the picker controls. No-op
  * unless a drag is active. */
-void colorEditorUpdateMouse(GLFWwindow* window, double mouseX, double mouseY);
+void colorEditorUpdateMouse(GLFWwindow* window, double fb_mx, double fb_my);
 
 /* Render. win_w/win_h are framebuffer pixels. */
 void colorEditorRender(int win_w, int win_h);

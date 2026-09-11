@@ -29,11 +29,12 @@
 /* z escapes once |z|² ≥ 4. */
 #define ESCAPE_RADIUS_SQ              4.0
 
-/* (c+1)² + ci² < 1/16 → c is in the period-1 main cardioid, never escapes. */
-#define MAIN_CARDIOID_THRESHOLD       0.0625
+/* Period-2 bulb: the disc of radius 1/4 centred at −1.
+ * (cr+1)² + ci² < 1/16 → c is inside it and never escapes. */
+#define PERIOD2_BULB_THRESHOLD        0.0625
 
-/* Period-2 bulb test: q·(q+xm) < ci²/4 where xm = cr − 1/4, q = xm² + ci². */
-#define PERIOD2_BULB_THRESHOLD        0.25
+/* Main cardioid: q·(q+xm) < ci²/4 where xm = cr − 1/4, q = xm² + ci². */
+#define MAIN_CARDIOID_THRESHOLD       0.25
 
 /* Auto-precision cutover: below this per-pixel scale, double's ~15-17
  * decimal digits cause neighboring pixels to collide. */
@@ -52,10 +53,15 @@
 
 /* ---------- Gradient construction ------------------------------------ */
 
-void gradientInterpol(const int points[][3], unsigned char ** gradient,
-                      int nb_points, int nb_gradients) {
+int gradientInterpol(const int points[][3], unsigned char ** gradient,
+                     int nb_points, int nb_gradients) {
 	int total = (nb_points - 1) * nb_gradients;
+	if (total <= 0) {
+		*gradient = NULL;
+		return 0;
+	}
 	*gradient = (unsigned char *) malloc((size_t)total * 3);
+	if (!*gradient) return 0;
 
 	int idx = 0;
 	for (int p = 0; p < nb_points - 1; p++) {
@@ -69,6 +75,7 @@ void gradientInterpol(const int points[][3], unsigned char ** gradient,
 			idx++;
 		}
 	}
+	return 1;
 }
 
 
@@ -88,7 +95,10 @@ static inline void colorizePixel(unsigned char * pixel, int iter,
 		return;
 	}
 	float r2 = (float)(escape_real * escape_real + escape_imag * escape_imag);
-	float nu = logf(0.5f * log2f(r2));
+	/* nu = log2(log2|z|). 0.5*log2(r2) is log2|z|; the outer log must be
+	 * base 2 as well. Using logf here scales the fractional offset by ln2
+	 * and leaves a ~0.31-iteration discontinuity at every band boundary. */
+	float nu = log2f(0.5f * log2f(r2));
 	float t = (iter + (1.0f - nu)) / max_iter;
 	if (t < 0.0f) t = 0.0f;
 	if (t > 1.0f) t = 1.0f;
@@ -107,12 +117,12 @@ static inline int iterateD(double c_real, double c_imag, int max_iter,
 	double c_imag_sq = c_imag * c_imag;
 
 	double cr_plus_one = c_real + 1.0;
-	if (cr_plus_one * cr_plus_one + c_imag_sq < MAIN_CARDIOID_THRESHOLD)
+	if (cr_plus_one * cr_plus_one + c_imag_sq < PERIOD2_BULB_THRESHOLD)
 		return max_iter;
 
 	double cr_minus_quarter = c_real - 0.25;
 	double q = cr_minus_quarter * cr_minus_quarter + c_imag_sq;
-	if (q * (q + cr_minus_quarter) < PERIOD2_BULB_THRESHOLD * c_imag_sq)
+	if (q * (q + cr_minus_quarter) < MAIN_CARDIOID_THRESHOLD * c_imag_sq)
 		return max_iter;
 
 	double z_real = 0.0, z_imag = 0.0;
@@ -138,12 +148,12 @@ static inline int iterateL(long double c_real, long double c_imag, int max_iter,
 	long double c_imag_sq = c_imag * c_imag;
 
 	long double cr_plus_one = c_real + 1.0L;
-	if (cr_plus_one * cr_plus_one + c_imag_sq < (long double)MAIN_CARDIOID_THRESHOLD)
+	if (cr_plus_one * cr_plus_one + c_imag_sq < (long double)PERIOD2_BULB_THRESHOLD)
 		return max_iter;
 
 	long double cr_minus_quarter = c_real - 0.25L;
 	long double q = cr_minus_quarter * cr_minus_quarter + c_imag_sq;
-	if (q * (q + cr_minus_quarter) < (long double)PERIOD2_BULB_THRESHOLD * c_imag_sq)
+	if (q * (q + cr_minus_quarter) < (long double)MAIN_CARDIOID_THRESHOLD * c_imag_sq)
 		return max_iter;
 
 	long double z_real = 0.0L, z_imag = 0.0L;
@@ -187,13 +197,13 @@ static inline void iterateSimd4(__m256d c_real, __m256d c_imag, int max_iter,
 		double ci_k = ci_arr[k];
 		double ci_k_sq = ci_k * ci_k;
 		double cr_plus_one = cr_k + 1.0;
-		if (cr_plus_one * cr_plus_one + ci_k_sq < MAIN_CARDIOID_THRESHOLD) {
+		if (cr_plus_one * cr_plus_one + ci_k_sq < PERIOD2_BULB_THRESHOLD) {
 			mask_arr[k] = -1;
 			continue;
 		}
 		double cr_minus_quarter = cr_k - 0.25;
 		double q = cr_minus_quarter * cr_minus_quarter + ci_k_sq;
-		if (q * (q + cr_minus_quarter) < PERIOD2_BULB_THRESHOLD * ci_k_sq) {
+		if (q * (q + cr_minus_quarter) < MAIN_CARDIOID_THRESHOLD * ci_k_sq) {
 			mask_arr[k] = -1;
 			continue;
 		}
@@ -863,6 +873,12 @@ void movePixelDataParallel(unsigned char * data, int pan_dx, int pan_dy, int n_t
 	for (int t = 0; t < created; t++) pthread_join(threads[t], NULL);
 }
 
+void movePixelDataParallelFree(void) {
+	free(move_temp);
+	move_temp     = NULL;
+	move_temp_cap = 0;
+}
+
 
 /* ---------- Dirty-cell list after a pan ------------------------------ */
 
@@ -871,6 +887,13 @@ void movePixelDataParallel(unsigned char * data, int pan_dx, int pan_dy, int n_t
  * is freshly revealed; pan_dy > 0 → content moved down, bottom strip
  * fresh; etc. */
 void updateCellsTab(int pan_dx, int pan_dy) {
+	/* A full redraw may already be queued for this frame (resize, zoom,
+	 * undo/redo, palette or max_n change). Rebuilding the list from a pan
+	 * strip would drop it on the floor and leave the stale image on screen,
+	 * so leave the queue alone — it already covers every cell this pan
+	 * could expose. */
+	if (nb_cells_to_update >= cell_number) return;
+
 	/* Guard against tiny windows where cell_pixel_w/h collapses to zero. */
 	int cell_w = cell_pixel_width  > 0 ? cell_pixel_width  : 1;
 	int cell_h = cell_pixel_height > 0 ? cell_pixel_height : 1;

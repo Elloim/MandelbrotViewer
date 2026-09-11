@@ -10,10 +10,11 @@
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
-#include <GL/glew.h>
+#include <GL/gl.h>
 
 #include "debug.h"
 #include "mandelbrot.h"   /* CELL_STATE_* */
+#include "ui.h"
 
 #define WIDGET_X       10
 #define WIDGET_Y       10
@@ -33,109 +34,6 @@
 #define DRAG_MAX_N      1
 #define DRAG_ZOOM_RATE  2
 
-/*
- * 8x8 bitmap font — Daniel Hepper's font8x8_basic, released to the public
- * domain (CC0). Each glyph is 8 rows; bit 0 of each byte is the leftmost
- * pixel.  https://github.com/dhepper/font8x8
- */
-static const unsigned char font8x8[96][8] = {
-	{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},  /* U+0020 (space) */
-	{ 0x18, 0x3C, 0x3C, 0x18, 0x18, 0x00, 0x18, 0x00},  /* U+0021 (!)     */
-	{ 0x36, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},  /* U+0022 (")     */
-	{ 0x36, 0x7F, 0x36, 0x7F, 0x36, 0x36, 0x00, 0x00},  /* U+0023 (#)     */
-	{ 0x0C, 0x3E, 0x03, 0x1E, 0x30, 0x1F, 0x0C, 0x00},  /* U+0024 ($)     */
-	{ 0x00, 0x63, 0x33, 0x18, 0x0C, 0x66, 0x63, 0x00},  /* U+0025 (%)     */
-	{ 0x1C, 0x36, 0x1C, 0x6E, 0x3B, 0x33, 0x6E, 0x00},  /* U+0026 (&)     */
-	{ 0x06, 0x06, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00},  /* U+0027 (')     */
-	{ 0x18, 0x0C, 0x06, 0x06, 0x06, 0x0C, 0x18, 0x00},  /* U+0028 (()     */
-	{ 0x06, 0x0C, 0x18, 0x18, 0x18, 0x0C, 0x06, 0x00},  /* U+0029 ())     */
-	{ 0x00, 0x66, 0x3C, 0xFF, 0x3C, 0x66, 0x00, 0x00},  /* U+002A (*)     */
-	{ 0x00, 0x0C, 0x0C, 0x3F, 0x0C, 0x0C, 0x00, 0x00},  /* U+002B (+)     */
-	{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C, 0x06},  /* U+002C (,)     */
-	{ 0x00, 0x00, 0x00, 0x3F, 0x00, 0x00, 0x00, 0x00},  /* U+002D (-)     */
-	{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C, 0x00},  /* U+002E (.)     */
-	{ 0x60, 0x30, 0x18, 0x0C, 0x06, 0x03, 0x01, 0x00},  /* U+002F (/)     */
-	{ 0x3E, 0x63, 0x73, 0x7B, 0x6F, 0x67, 0x3E, 0x00},  /* U+0030 (0)     */
-	{ 0x0C, 0x0E, 0x0C, 0x0C, 0x0C, 0x0C, 0x3F, 0x00},  /* U+0031 (1)     */
-	{ 0x1E, 0x33, 0x30, 0x1C, 0x06, 0x33, 0x3F, 0x00},  /* U+0032 (2)     */
-	{ 0x1E, 0x33, 0x30, 0x1C, 0x30, 0x33, 0x1E, 0x00},  /* U+0033 (3)     */
-	{ 0x38, 0x3C, 0x36, 0x33, 0x7F, 0x30, 0x78, 0x00},  /* U+0034 (4)     */
-	{ 0x3F, 0x03, 0x1F, 0x30, 0x30, 0x33, 0x1E, 0x00},  /* U+0035 (5)     */
-	{ 0x1C, 0x06, 0x03, 0x1F, 0x33, 0x33, 0x1E, 0x00},  /* U+0036 (6)     */
-	{ 0x3F, 0x33, 0x30, 0x18, 0x0C, 0x0C, 0x0C, 0x00},  /* U+0037 (7)     */
-	{ 0x1E, 0x33, 0x33, 0x1E, 0x33, 0x33, 0x1E, 0x00},  /* U+0038 (8)     */
-	{ 0x1E, 0x33, 0x33, 0x3E, 0x30, 0x18, 0x0E, 0x00},  /* U+0039 (9)     */
-	{ 0x00, 0x0C, 0x0C, 0x00, 0x00, 0x0C, 0x0C, 0x00},  /* U+003A (:)     */
-	{ 0x00, 0x0C, 0x0C, 0x00, 0x00, 0x0C, 0x0C, 0x06},  /* U+003B (;)     */
-	{ 0x18, 0x0C, 0x06, 0x03, 0x06, 0x0C, 0x18, 0x00},  /* U+003C (<)     */
-	{ 0x00, 0x00, 0x3F, 0x00, 0x00, 0x3F, 0x00, 0x00},  /* U+003D (=)     */
-	{ 0x06, 0x0C, 0x18, 0x30, 0x18, 0x0C, 0x06, 0x00},  /* U+003E (>)     */
-	{ 0x1E, 0x33, 0x30, 0x18, 0x0C, 0x00, 0x0C, 0x00},  /* U+003F (?)     */
-	{ 0x3E, 0x63, 0x7B, 0x7B, 0x7B, 0x03, 0x1E, 0x00},  /* U+0040 (@)     */
-	{ 0x0C, 0x1E, 0x33, 0x33, 0x3F, 0x33, 0x33, 0x00},  /* U+0041 (A)     */
-	{ 0x3F, 0x66, 0x66, 0x3E, 0x66, 0x66, 0x3F, 0x00},  /* U+0042 (B)     */
-	{ 0x3C, 0x66, 0x03, 0x03, 0x03, 0x66, 0x3C, 0x00},  /* U+0043 (C)     */
-	{ 0x1F, 0x36, 0x66, 0x66, 0x66, 0x36, 0x1F, 0x00},  /* U+0044 (D)     */
-	{ 0x7F, 0x46, 0x16, 0x1E, 0x16, 0x46, 0x7F, 0x00},  /* U+0045 (E)     */
-	{ 0x7F, 0x46, 0x16, 0x1E, 0x16, 0x06, 0x0F, 0x00},  /* U+0046 (F)     */
-	{ 0x3C, 0x66, 0x03, 0x03, 0x73, 0x66, 0x7C, 0x00},  /* U+0047 (G)     */
-	{ 0x33, 0x33, 0x33, 0x3F, 0x33, 0x33, 0x33, 0x00},  /* U+0048 (H)     */
-	{ 0x1E, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x1E, 0x00},  /* U+0049 (I)     */
-	{ 0x78, 0x30, 0x30, 0x30, 0x33, 0x33, 0x1E, 0x00},  /* U+004A (J)     */
-	{ 0x67, 0x66, 0x36, 0x1E, 0x36, 0x66, 0x67, 0x00},  /* U+004B (K)     */
-	{ 0x0F, 0x06, 0x06, 0x06, 0x46, 0x66, 0x7F, 0x00},  /* U+004C (L)     */
-	{ 0x63, 0x77, 0x7F, 0x7F, 0x6B, 0x63, 0x63, 0x00},  /* U+004D (M)     */
-	{ 0x63, 0x67, 0x6F, 0x7B, 0x73, 0x63, 0x63, 0x00},  /* U+004E (N)     */
-	{ 0x1C, 0x36, 0x63, 0x63, 0x63, 0x36, 0x1C, 0x00},  /* U+004F (O)     */
-	{ 0x3F, 0x66, 0x66, 0x3E, 0x06, 0x06, 0x0F, 0x00},  /* U+0050 (P)     */
-	{ 0x1E, 0x33, 0x33, 0x33, 0x3B, 0x1E, 0x38, 0x00},  /* U+0051 (Q)     */
-	{ 0x3F, 0x66, 0x66, 0x3E, 0x36, 0x66, 0x67, 0x00},  /* U+0052 (R)     */
-	{ 0x1E, 0x33, 0x07, 0x0E, 0x38, 0x33, 0x1E, 0x00},  /* U+0053 (S)     */
-	{ 0x3F, 0x2D, 0x0C, 0x0C, 0x0C, 0x0C, 0x1E, 0x00},  /* U+0054 (T)     */
-	{ 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x3F, 0x00},  /* U+0055 (U)     */
-	{ 0x33, 0x33, 0x33, 0x33, 0x33, 0x1E, 0x0C, 0x00},  /* U+0056 (V)     */
-	{ 0x63, 0x63, 0x63, 0x6B, 0x7F, 0x77, 0x63, 0x00},  /* U+0057 (W)     */
-	{ 0x63, 0x63, 0x36, 0x1C, 0x1C, 0x36, 0x63, 0x00},  /* U+0058 (X)     */
-	{ 0x33, 0x33, 0x33, 0x1E, 0x0C, 0x0C, 0x1E, 0x00},  /* U+0059 (Y)     */
-	{ 0x7F, 0x63, 0x31, 0x18, 0x4C, 0x66, 0x7F, 0x00},  /* U+005A (Z)     */
-	{ 0x1E, 0x06, 0x06, 0x06, 0x06, 0x06, 0x1E, 0x00},  /* U+005B ([)     */
-	{ 0x03, 0x06, 0x0C, 0x18, 0x30, 0x60, 0x40, 0x00},  /* U+005C (\)     */
-	{ 0x1E, 0x18, 0x18, 0x18, 0x18, 0x18, 0x1E, 0x00},  /* U+005D (])     */
-	{ 0x08, 0x1C, 0x36, 0x63, 0x00, 0x00, 0x00, 0x00},  /* U+005E (^)     */
-	{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF},  /* U+005F (_)     */
-	{ 0x0C, 0x0C, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00},  /* U+0060 (`)     */
-	{ 0x00, 0x00, 0x1E, 0x30, 0x3E, 0x33, 0x6E, 0x00},  /* U+0061 (a)     */
-	{ 0x07, 0x06, 0x06, 0x3E, 0x66, 0x66, 0x3B, 0x00},  /* U+0062 (b)     */
-	{ 0x00, 0x00, 0x1E, 0x33, 0x03, 0x33, 0x1E, 0x00},  /* U+0063 (c)     */
-	{ 0x38, 0x30, 0x30, 0x3E, 0x33, 0x33, 0x6E, 0x00},  /* U+0064 (d)     */
-	{ 0x00, 0x00, 0x1E, 0x33, 0x3F, 0x03, 0x1E, 0x00},  /* U+0065 (e)     */
-	{ 0x1C, 0x36, 0x06, 0x0F, 0x06, 0x06, 0x0F, 0x00},  /* U+0066 (f)     */
-	{ 0x00, 0x00, 0x6E, 0x33, 0x33, 0x3E, 0x30, 0x1F},  /* U+0067 (g)     */
-	{ 0x07, 0x06, 0x36, 0x6E, 0x66, 0x66, 0x67, 0x00},  /* U+0068 (h)     */
-	{ 0x0C, 0x00, 0x0E, 0x0C, 0x0C, 0x0C, 0x1E, 0x00},  /* U+0069 (i)     */
-	{ 0x30, 0x00, 0x30, 0x30, 0x30, 0x33, 0x33, 0x1E},  /* U+006A (j)     */
-	{ 0x07, 0x06, 0x66, 0x36, 0x1E, 0x36, 0x67, 0x00},  /* U+006B (k)     */
-	{ 0x0E, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x1E, 0x00},  /* U+006C (l)     */
-	{ 0x00, 0x00, 0x33, 0x7F, 0x7F, 0x6B, 0x63, 0x00},  /* U+006D (m)     */
-	{ 0x00, 0x00, 0x1F, 0x33, 0x33, 0x33, 0x33, 0x00},  /* U+006E (n)     */
-	{ 0x00, 0x00, 0x1E, 0x33, 0x33, 0x33, 0x1E, 0x00},  /* U+006F (o)     */
-	{ 0x00, 0x00, 0x3B, 0x66, 0x66, 0x3E, 0x06, 0x0F},  /* U+0070 (p)     */
-	{ 0x00, 0x00, 0x6E, 0x33, 0x33, 0x3E, 0x30, 0x78},  /* U+0071 (q)     */
-	{ 0x00, 0x00, 0x3B, 0x6E, 0x66, 0x06, 0x0F, 0x00},  /* U+0072 (r)     */
-	{ 0x00, 0x00, 0x3E, 0x03, 0x1E, 0x30, 0x1F, 0x00},  /* U+0073 (s)     */
-	{ 0x08, 0x0C, 0x3E, 0x0C, 0x0C, 0x2C, 0x18, 0x00},  /* U+0074 (t)     */
-	{ 0x00, 0x00, 0x33, 0x33, 0x33, 0x33, 0x6E, 0x00},  /* U+0075 (u)     */
-	{ 0x00, 0x00, 0x33, 0x33, 0x33, 0x1E, 0x0C, 0x00},  /* U+0076 (v)     */
-	{ 0x00, 0x00, 0x63, 0x6B, 0x7F, 0x7F, 0x36, 0x00},  /* U+0077 (w)     */
-	{ 0x00, 0x00, 0x63, 0x36, 0x1C, 0x36, 0x63, 0x00},  /* U+0078 (x)     */
-	{ 0x00, 0x00, 0x33, 0x33, 0x33, 0x3E, 0x30, 0x1F},  /* U+0079 (y)     */
-	{ 0x00, 0x00, 0x3F, 0x19, 0x0C, 0x26, 0x3F, 0x00},  /* U+007A (z)     */
-	{ 0x38, 0x0C, 0x0C, 0x07, 0x0C, 0x0C, 0x38, 0x00},  /* U+007B ({)     */
-	{ 0x18, 0x18, 0x18, 0x00, 0x18, 0x18, 0x18, 0x00},  /* U+007C (|)     */
-	{ 0x07, 0x0C, 0x0C, 0x38, 0x0C, 0x0C, 0x07, 0x00},  /* U+007D (})     */
-	{ 0x6E, 0x3B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},  /* U+007E (~)     */
-	{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},  /* U+007F          */
-};
 
 static struct {
 	int visible;
@@ -322,24 +220,6 @@ void debugKeyCallback(GLFWwindow* window, int key, int scancode, int action, int
 	}
 }
 
-static void cursorToFramebuffer(GLFWwindow* window, double mx, double my,
-                                 double* out_x, double* out_y) {
-	int win_w, win_h, fb_w, fb_h;
-	glfwGetWindowSize(window, &win_w, &win_h);
-	glfwGetFramebufferSize(window, &fb_w, &fb_h);
-	*out_x = (win_w > 0) ? mx * fb_w / win_w : mx;
-	*out_y = (win_h > 0) ? my * fb_h / win_h : my;
-}
-
-static int pointInRect(double x, double y, int rx, int ry, int rw, int rh) {
-	return (x >= rx && x <= rx + rw && y >= ry && y <= ry + rh);
-}
-
-static int pointInRectPad(double x, double y, int rx, int ry, int rw, int rh, int pad) {
-	return (x >= rx - pad && x <= rx + rw + pad &&
-	        y >= ry - pad && y <= ry + rh + pad);
-}
-
 static void setMaxNFromSlider(double fb_mx) {
 	double t = (fb_mx - dbg.sx) / (double)dbg.sw;
 	if (t < 0.0) t = 0.0;
@@ -380,117 +260,81 @@ void debugMouseButtonCallback(GLFWwindow* window, int button, int action, int mo
 
 	double mx, my, fb_mx, fb_my;
 	glfwGetCursorPos(window, &mx, &my);
-	cursorToFramebuffer(window, mx, my, &fb_mx, &fb_my);
+	uiCursorToFramebuffer(window, mx, my, &fb_mx, &fb_my);
 
-	if (!pointInRect(fb_mx, fb_my, dbg.wx, dbg.wy, dbg.ww, dbg.wh)) return;
+	if (!uiPointInRect(fb_mx, fb_my, dbg.wx, dbg.wy, dbg.ww, dbg.wh)) return;
 
 	dbg.captured = 1;
 
 	if (button != GLFW_MOUSE_BUTTON_LEFT) return;
 
 	int margin = 8;
-	if (pointInRectPad(fb_mx, fb_my, dbg.sx, dbg.sy, dbg.sw, dbg.sh, margin)) {
+	if (uiPointInRectPad(fb_mx, fb_my, dbg.sx, dbg.sy, dbg.sw, dbg.sh, margin)) {
 		dbg.dragging = DRAG_MAX_N;
 		setMaxNFromSlider(fb_mx);
 		return;
 	}
-	if (pointInRectPad(fb_mx, fb_my, dbg.zsx, dbg.zsy, dbg.zsw, dbg.zsh, margin)) {
+	if (uiPointInRectPad(fb_mx, fb_my, dbg.zsx, dbg.zsy, dbg.zsw, dbg.zsh, margin)) {
 		dbg.dragging = DRAG_ZOOM_RATE;
 		setZoomRateFromSlider(fb_mx);
 		return;
 	}
 
 	int spad = 3;
-	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.prec_y + (dbg.line_h - dbg.sq_sz) / 2,
+	if (uiPointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.prec_y + (dbg.line_h - dbg.sq_sz) / 2,
 	                   dbg.sq_sz, dbg.sq_sz, spad)) {
 		dbg.prec_mode = (dbg.prec_mode + 1) % 3;
 		dbg.dirty = 1;
 		return;
 	}
-	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.tex_y + (dbg.line_h - dbg.sq_sz) / 2,
+	if (uiPointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.tex_y + (dbg.line_h - dbg.sq_sz) / 2,
 	                   dbg.sq_sz, dbg.sq_sz, spad)) {
 		dbg.texture_mode = !dbg.texture_mode;
 		dbg.dirty = 1;
 		return;
 	}
-	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.simd_y + (dbg.line_h - dbg.sq_sz) / 2,
+	if (uiPointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.simd_y + (dbg.line_h - dbg.sq_sz) / 2,
 	                   dbg.sq_sz, dbg.sq_sz, spad)) {
 		dbg.simd_mode = !dbg.simd_mode;
 		dbg.dirty = 1;
 		return;
 	}
-	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.move_par_y + (dbg.line_h - dbg.sq_sz) / 2,
+	if (uiPointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.move_par_y + (dbg.line_h - dbg.sq_sz) / 2,
 	                   dbg.sq_sz, dbg.sq_sz, spad)) {
 		dbg.move_par_mode = !dbg.move_par_mode;
 		/* No dirty bit — output is identical, just changes implementation. */
 		return;
 	}
-	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.cells_y + (dbg.line_h - dbg.sq_sz) / 2,
+	if (uiPointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.cells_y + (dbg.line_h - dbg.sq_sz) / 2,
 	                   dbg.sq_sz, dbg.sq_sz, spad)) {
 		dbg.show_cells_mode = !dbg.show_cells_mode;
 		return;
 	}
-	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.border_opt_y + (dbg.line_h - dbg.sq_sz) / 2,
+	if (uiPointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.border_opt_y + (dbg.line_h - dbg.sq_sz) / 2,
 	                   dbg.sq_sz, dbg.sq_sz, spad)) {
 		dbg.border_opt_mode = !dbg.border_opt_mode;
 		/* No dirty bit — output is pixel-identical, just changes the
 		 * compute path workers take. */
 		return;
 	}
-	if (pointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.fps_cap_y + (dbg.line_h - dbg.sq_sz) / 2,
+	if (uiPointInRectPad(fb_mx, fb_my, dbg.sq_x, dbg.fps_cap_y + (dbg.line_h - dbg.sq_sz) / 2,
 	                   dbg.sq_sz, dbg.sq_sz, spad)) {
 		dbg.fps_cap_mode = !dbg.fps_cap_mode;
 		return;
 	}
 }
 
-void debugUpdateMouse(GLFWwindow* window, double mouseX, double mouseY) {
+void debugUpdateMouse(GLFWwindow* window, double fb_mx, double fb_my) {
 	if (!dbg.visible || dbg.dragging == DRAG_NONE) return;
+	(void)fb_my;
 
 	int fb_w, fb_h;
 	glfwGetFramebufferSize(window, &fb_w, &fb_h);
 	(void)fb_w;
 	recomputeLayout(fb_h);
 
-	double fb_mx, fb_my;
-	cursorToFramebuffer(window, mouseX, mouseY, &fb_mx, &fb_my);
-	(void)fb_my;
 	if (dbg.dragging == DRAG_MAX_N)     setMaxNFromSlider(fb_mx);
 	if (dbg.dragging == DRAG_ZOOM_RATE) setZoomRateFromSlider(fb_mx);
-}
-
-static void drawQuad(int x, int y, int w, int h) {
-	glBegin(GL_QUADS);
-	glVertex2i(x,     y);
-	glVertex2i(x + w, y);
-	glVertex2i(x + w, y + h);
-	glVertex2i(x,     y + h);
-	glEnd();
-}
-
-static void drawText(int x, int y, const char* text, int scale) {
-	glBegin(GL_QUADS);
-	for (int c = 0; text[c]; c++) {
-		unsigned char ch = (unsigned char)text[c];
-		if (ch < 32 || ch > 126) ch = '?';
-		const unsigned char* bm = font8x8[ch - 32];
-		int base_x = x + c * 8 * scale;
-		for (int row = 0; row < 8; row++) {
-			unsigned char b = bm[row];
-			if (!b) continue;
-			for (int col = 0; col < 8; col++) {
-				if (b & (1u << col)) {
-					int px = base_x + col * scale;
-					int py = y + row * scale;
-					glVertex2i(px,         py);
-					glVertex2i(px + scale, py);
-					glVertex2i(px + scale, py + scale);
-					glVertex2i(px,         py + scale);
-				}
-			}
-		}
-	}
-	glEnd();
 }
 
 /* Translucent per-cell tints showing which cells the workers touched this
@@ -604,18 +448,18 @@ void debugDrawCellGrid(int win_w, int win_h, int rows, int cols) {
 static void drawSliderTrack(int sx, int sy, int sw, int sh, double t) {
 	int track_y = sy + sh / 2 - 2;
 	glColor4f(0.25f, 0.25f, 0.28f, 0.95f);
-	drawQuad(sx, track_y, sw, 4);
+	uiDrawQuad(sx, track_y, sw, 4);
 
 	if (t < 0.0) t = 0.0;
 	if (t > 1.0) t = 1.0;
 	int fill_w = (int)(sw * t);
 
 	glColor4f(0.4f, 0.75f, 1.0f, 0.95f);
-	drawQuad(sx, track_y, fill_w, 4);
+	uiDrawQuad(sx, track_y, fill_w, 4);
 
 	int knob_x = sx + fill_w - KNOB_WIDTH / 2;
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-	drawQuad(knob_x, sy - 2, KNOB_WIDTH, sh + 4);
+	uiDrawQuad(knob_x, sy - 2, KNOB_WIDTH, sh + 4);
 }
 
 static void drawToggleRow(int row_y, const char* label, int s,
@@ -626,7 +470,7 @@ static void drawToggleRow(int row_y, const char* label, int s,
 	int sq_y = row_y + (line_h - sq_sz) / 2;
 
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-	drawText(dbg.wx + WIDGET_PAD, row_y + (line_h - 8 * s) / 2, label, s);
+	uiDrawText(dbg.wx + WIDGET_PAD, row_y + (line_h - 8 * s) / 2, label, s);
 
 	/* Square outline. */
 	glColor4f(1.0f, 1.0f, 1.0f, 0.55f);
@@ -640,7 +484,7 @@ static void drawToggleRow(int row_y, const char* label, int s,
 	if (two_state) {
 		if (state) {
 			glColor4f(0.4f, 0.85f, 0.5f, 0.95f);
-			drawQuad(sq_x + 2, sq_y + 2, sq_sz - 4, sq_sz - 4);
+			uiDrawQuad(sq_x + 2, sq_y + 2, sq_sz - 4, sq_sz - 4);
 		}
 	} else {
 		/* Tri-state: a centered letter shows which mode is active. */
@@ -648,7 +492,7 @@ static void drawToggleRow(int row_y, const char* label, int s,
 		int tx = sq_x + (sq_sz - 8 * s) / 2;
 		int ty = sq_y + (sq_sz - 8 * s) / 2;
 		glColor4f(0.55f, 0.85f, 1.0f, 1.0f);
-		drawText(tx, ty, buf, s);
+		uiDrawText(tx, ty, buf, s);
 	}
 }
 
@@ -675,7 +519,7 @@ void debugRender(int win_w, int win_h) {
 
 	/* Background panel */
 	glColor4f(0.0f, 0.0f, 0.0f, 0.55f);
-	drawQuad(dbg.wx, dbg.wy, dbg.ww, dbg.wh);
+	uiDrawQuad(dbg.wx, dbg.wy, dbg.ww, dbg.wh);
 
 	/* Border */
 	glColor4f(1.0f, 1.0f, 1.0f, 0.25f);
@@ -693,25 +537,25 @@ void debugRender(int win_w, int win_h) {
 	char buf[64];
 
 	glColor4f(0.55f, 0.85f, 1.0f, 1.0f);
-	drawText(tx, ty, "DEBUG  (M to hide)", s);
+	uiDrawText(tx, ty, "DEBUG  (M to hide)", s);
 	ty += line_h + LINE_SPACING;
 
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
 	snprintf(buf, sizeof(buf), "FPS:         %7.1f", dbg.fps);
-	drawText(tx, ty, buf, s);
+	uiDrawText(tx, ty, buf, s);
 	ty += line_h;
 
 	snprintf(buf, sizeof(buf), "ms/frame:    %7.2f", dbg.ms_per_frame);
-	drawText(tx, ty, buf, s);
+	uiDrawText(tx, ty, buf, s);
 	ty += line_h;
 
 	snprintf(buf, sizeof(buf), "thread wait: %7.2f ms", dbg.avg_wait_ms);
-	drawText(tx, ty, buf, s);
+	uiDrawText(tx, ty, buf, s);
 	ty += line_h + LINE_SPACING;
 
 	snprintf(buf, sizeof(buf), "max_n: %d", dbg.max_n);
-	drawText(tx, ty, buf, s);
+	uiDrawText(tx, ty, buf, s);
 
 	double slider_t_maxn = (double)(dbg.max_n - MAX_N_MIN) /
 	                       (double)(MAX_N_MAX - MAX_N_MIN);
@@ -719,7 +563,7 @@ void debugRender(int win_w, int win_h) {
 
 	long double zr = zoomRateFromT(dbg.zoom_rate_t);
 	snprintf(buf, sizeof(buf), "zoom rate: %.2Lfx/s", zr);
-	drawText(tx, dbg.zr_label_y, buf, s);
+	uiDrawText(tx, dbg.zr_label_y, buf, s);
 	drawSliderTrack(dbg.zsx, dbg.zsy, dbg.zsw, dbg.zsh, dbg.zoom_rate_t);
 
 	long double z = dbg.current_zoom;
@@ -729,7 +573,7 @@ void debugRender(int win_w, int win_h) {
 	} else {
 		snprintf(buf, sizeof(buf), "zoom: %.3Le", z);
 	}
-	drawText(tx, dbg.zoom_value_y, buf, s);
+	uiDrawText(tx, dbg.zoom_value_y, buf, s);
 
 	char prec_letter = (dbg.prec_mode == 1) ? 'D' :
 	                   (dbg.prec_mode == 2) ? 'L' : 'A';

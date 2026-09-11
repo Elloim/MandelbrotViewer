@@ -10,15 +10,17 @@
 #include <math.h>
 #include <pthread.h>
 #include <time.h>
+#include <errno.h>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
-#include <GL/glew.h>
+#include <GL/gl.h>
 
 #include "main.h"
 #include "mandelbrot.h"
 #include "debug.h"
 #include "color_editor.h"
+#include "ui.h"
 
 int width = 2100;
 int height = 1500;
@@ -43,6 +45,10 @@ static int move_par_mode = 0;   /* updated each frame from debugGetMoveParallelM
 
 /* Range of the initial view; used to compute the "current zoom" readout. */
 #define INITIAL_X_RANGE 3.0L
+
+/* Pixel offsets are computed as int ((r * width + c) * 3), so the pixel
+ * count has to stay well inside INT_MAX. 16384² * 3 ≈ 8.1e8 does. */
+#define MAX_WINDOW_DIM 16384
 
 /* Persistent texture for the textured-quad render path. */
 static GLuint fractal_tex = 0;
@@ -175,6 +181,11 @@ static int histPop(view_t* stack, int* count, view_t* out) {
 
 static void histClearForward(void) { hist_forward_count = 0; }
 
+static int viewEqual(const view_t* a, const view_t* b) {
+	return a->xmin == b->xmin && a->xmax == b->xmax &&
+	       a->ymin == b->ymin && a->ymax == b->ymax;
+}
+
 /* ---------- GLFW key callback ---------- */
 
 void mainKeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -195,6 +206,33 @@ static void mainMouseButtonCallback(GLFWwindow* window, int button, int action, 
 	colorEditorMouseButtonCallback(window, button, action, mods);
 }
 
+
+static void usage(const char* prog) {
+	fprintf(stderr,
+	    "usage: %s [-w WIDTH] [-h HEIGHT] [-max ITERATIONS] [-history DEPTH]\n"
+	    "  -w WIDTH         window width in pixels  (1..%d, default 2100)\n"
+	    "  -h HEIGHT        window height in pixels (1..%d, default 1500)\n"
+	    "  -max ITERATIONS  iteration cap per pixel (1..1000000, default 500)\n"
+	    "  -history DEPTH   undo/redo depth         (1..10000, default 32)\n",
+	    prog, MAX_WINDOW_DIM, MAX_WINDOW_DIM);
+}
+
+/* strtol plus the checks strtol alone does not make: rejects an empty or
+ * non-numeric argument, trailing garbage, overflow, and out-of-range
+ * values. Returns 1 and writes *out on success, 0 after reporting why. */
+static int parseIntArg(const char* value, const char* name,
+                       int lo, int hi, int* out) {
+	char* end = NULL;
+	errno = 0;
+	long v = strtol(value, &end, 10);
+	if (end == value || *end != '\0' || errno == ERANGE || v < lo || v > hi) {
+		fprintf(stderr, "%s: expected an integer in [%d, %d], got \"%s\"\n",
+		        name, lo, hi, value);
+		return 0;
+	}
+	*out = (int)v;
+	return 1;
+}
 
 void error_callback(int error, const char* description) {
 	fprintf(stderr, "Erreur glfw num %d : %s\n", error, description);
@@ -409,19 +447,33 @@ int main(int argc, char** argv) {
 	int max_n = 500;
 
 	for (int arg = 1; arg < argc; arg++) {
-		if (!strcmp("-history", argv[arg]) && arg + 1 < argc) {
-			hist_capacity = (int) strtol(argv[arg+1], NULL, 10);
-			if (hist_capacity < 1)     hist_capacity = 1;
-			if (hist_capacity > 10000) hist_capacity = 10000;
+		const char* opt = argv[arg];
+		int lo, hi, * dst;
+
+		if (!strcmp(opt, "-help") || !strcmp(opt, "--help")) {
+			usage(argv[0]);
+			return 0;
 		}
-		else if (!strncmp("-w", argv[arg], 2) && arg + 1 < argc) {
-			width = (int) strtol(argv[arg+1], NULL, 10);
+		/* Exact matches: the old prefix compare let "-hello" set the
+		 * height and swallowed typos in silence. */
+		else if (!strcmp(opt, "-w"))       { lo = 1; hi = MAX_WINDOW_DIM; dst = &width; }
+		else if (!strcmp(opt, "-h"))       { lo = 1; hi = MAX_WINDOW_DIM; dst = &height; }
+		else if (!strcmp(opt, "-max"))     { lo = 1; hi = 1000000;        dst = &max_n; }
+		else if (!strcmp(opt, "-history")) { lo = 1; hi = 10000;          dst = &hist_capacity; }
+		else {
+			fprintf(stderr, "unknown option \"%s\"\n", opt);
+			usage(argv[0]);
+			return -1;
 		}
-		else if (!strncmp("-h", argv[arg], 2) && arg + 1 < argc) {
-			height = (int) strtol(argv[arg+1], NULL, 10);
+
+		if (arg + 1 >= argc) {
+			fprintf(stderr, "%s: missing value\n", opt);
+			usage(argv[0]);
+			return -1;
 		}
-		else if (!strncmp("-max", argv[arg], 4) && arg + 1 < argc) {
-			max_n = (int) strtol(argv[arg+1], NULL, 10);
+		if (!parseIntArg(argv[++arg], opt, lo, hi, dst)) {
+			usage(argv[0]);
+			return -1;
 		}
 	}
 
@@ -447,16 +499,9 @@ int main(int argc, char** argv) {
 
 	glfwMakeContextCurrent(window);
 
-	glewExperimental = GL_TRUE;
-	GLenum err = glewInit();
-	/* GLEW_ERROR_NO_GLX_DISPLAY is expected on Wayland/EGL — there is no GLX. */
-	if (GLEW_OK != err && err != GLEW_ERROR_NO_GLX_DISPLAY) {
-		fprintf(stderr, "Error: %s (code %d)\n", glewGetErrorString(err), err);
-		glfwDestroyWindow(window);
-		glfwTerminate();
-		return -1;
-	}
-	glGetError();
+	/* No extension loader: every GL entry point used here is core OpenGL
+	 * 1.1/1.2 (immediate mode, glDrawPixels, glTexSubImage2D), so glfw's
+	 * own gl.h declarations are enough. */
 
 	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 	glfwSetErrorCallback(error_callback);
@@ -508,7 +553,13 @@ int main(int argc, char** argv) {
 	int interp_size = 256;
 	int n_stops = colorEditorNumStops();
 	int size_grad = (n_stops - 1) * interp_size;
-	gradientInterpol(colorEditorStops(), &gradient, n_stops, interp_size);
+	if (!gradientInterpol(colorEditorStops(), &gradient, n_stops, interp_size)) {
+		fprintf(stderr, "Failed to allocate gradient\n");
+		free(data);
+		glfwDestroyWindow(window);
+		glfwTerminate();
+		return -1;
+	}
 
 	cell_number_row = 80;
 	cell_number_col = 80;
@@ -567,7 +618,17 @@ int main(int argc, char** argv) {
 		prevmouseX = mouseX;
 		prevmouseY = mouseY;
 		glfwGetFramebufferSize(window, &width, &height);
-		glfwGetCursorPos(window, &mouseX, &mouseY);
+		/* GLFW reports the cursor in window coordinates. Everything
+		 * downstream — the pan delta that drives movePixelData, the zoom
+		 * anchor, the selection rect, the widget hit-tests — is in
+		 * framebuffer pixels, and the two differ whenever the display
+		 * scales the window. Convert once, here, so there is a single
+		 * coordinate space below this line. */
+		{
+			double win_mx, win_my;
+			glfwGetCursorPos(window, &win_mx, &win_my);
+			uiCursorToFramebuffer(window, win_mx, win_my, &mouseX, &mouseY);
+		}
 
 		if (width <= 0 || height <= 0) {
 			/* Window minimized — block until something happens. */
@@ -619,18 +680,28 @@ int main(int argc, char** argv) {
 		}
 		if (colorEditorConsumeDirty()) {
 			/* Palette changed — regenerate the interpolated gradient and
-			 * point every thread arg at the new buffer. n_stops can grow
-			 * or shrink, so size_grad must be recomputed too. */
-			free(gradient);
-			gradient = NULL;
-			n_stops = colorEditorNumStops();
-			size_grad = (n_stops - 1) * interp_size;
-			gradientInterpol(colorEditorStops(), &gradient, n_stops, interp_size);
-			for (int i = 0; i < num_threads; i++) {
-				arguments[i].gradient = gradient;
-				arguments[i].gradient_size = size_grad;
+			 * point every thread arg at the new buffer. The stop count can
+			 * grow or shrink, so the size must be recomputed too. Build
+			 * into a fresh pointer and only retire the old ramp once the
+			 * new one exists: on a failed allocation the workers keep
+			 * rendering with the previous palette instead of following a
+			 * null pointer. */
+			unsigned char * new_gradient = NULL;
+			int new_n_stops   = colorEditorNumStops();
+			int new_size_grad = (new_n_stops - 1) * interp_size;
+			if (gradientInterpol(colorEditorStops(), &new_gradient,
+			                     new_n_stops, interp_size)) {
+				free(gradient);
+				gradient  = new_gradient;
+				size_grad = new_size_grad;
+				for (int i = 0; i < num_threads; i++) {
+					arguments[i].gradient = gradient;
+					arguments[i].gradient_size = size_grad;
+				}
+				markAllCellsDirty();
+			} else {
+				fprintf(stderr, "Failed to allocate gradient; keeping the previous palette\n");
 			}
-			markAllCellsDirty();
 		}
 
 		/* Undo / redo: applied before navigation so the new view is what the
@@ -640,15 +711,25 @@ int main(int argc, char** argv) {
 			undo_pending = 0;
 			view_t cur = { xmin, xmax, ymin, ymax };
 			view_t prev;
+			int changed = 1;
 			if (histPop(hist_back, &hist_back_count, &prev)) {
 				histPush(&hist_forward, &hist_forward_count, cur);
+			} else if (viewEqual(&cur, &default_view)) {
+				/* Already home with nothing left to undo. Doing nothing
+				 * keeps repeated Ctrl-Z from stacking identical entries
+				 * on the redo side. */
+				changed = 0;
+			} else {
+				/* Bottom of the stack: fall back to the default view, but
+				 * record where we were so Ctrl-R can return. */
+				histPush(&hist_forward, &hist_forward_count, cur);
+				prev = default_view;
+			}
+			if (changed) {
 				xmin = prev.xmin; xmax = prev.xmax;
 				ymin = prev.ymin; ymax = prev.ymax;
-			} else {
-				xmin = default_view.xmin; xmax = default_view.xmax;
-				ymin = default_view.ymin; ymax = default_view.ymax;
+				markAllCellsDirty();
 			}
-			markAllCellsDirty();
 		}
 		if (redo_pending) {
 			redo_pending = 0;
@@ -749,6 +830,7 @@ int main(int argc, char** argv) {
 	}
 
 	glDeleteTextures(1, &fractal_tex);
+	movePixelDataParallelFree();
 	free(data);
 	free(gradient);
 	free(cells_to_update);

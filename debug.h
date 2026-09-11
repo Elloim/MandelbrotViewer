@@ -58,9 +58,10 @@ int  debugCapturesMouse(void);
 void debugKeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
 void debugMouseButtonCallback(GLFWwindow* window, int button, int action, int mods);
 
-/* Called once per frame with the current cursor position (window coords).
- * Drives slider dragging — does nothing unless a drag is active. */
-void debugUpdateMouse(GLFWwindow* window, double mouseX, double mouseY);
+/* Called once per frame with the cursor position in FRAMEBUFFER pixels
+ * (see uiCursorToFramebuffer). Drives slider dragging — does nothing
+ * unless a drag is active. */
+void debugUpdateMouse(GLFWwindow* window, double fb_mx, double fb_my);
 
 /* Per-frame tick. Pass glfwGetTime(). Recomputes FPS / ms-per-frame /
  * average thread wait once per second. */
